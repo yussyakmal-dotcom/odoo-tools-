@@ -172,4 +172,4 @@ docker compose down        # stop, data tetap tersimpan
 
 ## Berikutnya
 
-Selanjutnya tambahkan **Local Query Engine**: cari ID komponen X di semua baris BOM dari snapshot aktif, lalu rancangkan perubahan massal X → Y sebagai change set terpisah tanpa mengubah snapshot asli.
+Selanjutnya bangun **Download Excel → Edit Component dan/atau Qty → Upload Excel → Preview → Apply to Local**. Excel mengubah **working BOM pada SQLite lokal**, bukan Odoo. Snapshot mentah tetap utuh dan hasil edit tercatat sebagai revisi lokal. **Mekanisme update ke Odoo belum dibahas dan tidak boleh diimplementasikan pada fase Excel ini.** Spesifikasi detail: [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md#8a-alur-perubahan-bom-via-excel--hanya-database-lokal).
