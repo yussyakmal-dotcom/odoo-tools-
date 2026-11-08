@@ -203,10 +203,18 @@ def _update_progress(path: str, run_id: int, model: str, count: int, note: str =
 
 async def _read(client: httpx.AsyncClient, url: str, dbname: str | None, token: str,
                 model: str, method: str, params: dict) -> Any:
-    try:
-        return await json2_call(client, url, dbname, token, model, method, params)
-    except OdooProbeError as exc:
-        raise SyncFailure(exc.category, f"{model}/{method}") from exc
+    for attempt in range(3):
+        try:
+            return await json2_call(client, url, dbname, token, model, method, params)
+        except OdooProbeError as exc:
+            transient = exc.category == "network" or (
+                exc.category == "odoo_error" and exc.status in (429, 502, 503, 504)
+            )
+            if not transient or attempt == 2:
+                raise SyncFailure(exc.category, f"{model}/{method}") from exc
+            # Bounded backoff only for transient failures. No retry for auth/ACL/schema.
+            await asyncio.sleep(2 ** attempt)
+    raise SyncFailure("retry_exhausted", model)
 
 
 async def _count(client: httpx.AsyncClient, url: str, dbname: str | None, token: str,
