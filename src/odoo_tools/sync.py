@@ -232,9 +232,11 @@ async def _fields(client: httpx.AsyncClient, url: str, dbname: str | None, token
                            {"attributes": ["type", "relation"]})
     if not isinstance(metadata, dict):
         raise SyncFailure("invalid_fields", model)
-    fields = [field for field in MODEL_FIELDS[model] if field in metadata]
-    required = ("id", "bom_id", "product_id") if model == "mrp.bom.line" else (
-        ("id", "product_tmpl_id") if model == "mrp.bom" else ("id",)
+    # Odoo's automatic record id can be read even when a customized
+    # fields_get response does not list it explicitly.
+    fields = ["id"] + [field for field in MODEL_FIELDS[model] if field != "id" and field in metadata]
+    required = ("bom_id", "product_id") if model == "mrp.bom.line" else (
+        ("product_tmpl_id",) if model == "mrp.bom" else ()
     )
     if any(field not in fields for field in required):
         raise SyncFailure("missing_required_fields", model)
