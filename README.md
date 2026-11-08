@@ -135,6 +135,50 @@ docker compose logs -f worker
 
 Port browser tetap `http://localhost:700/` pada host; Docker memetakan localhost port `700` ke container `8080`.
 
+## Edit BOM Lokal melalui Excel
+
+**Sudah diimplementasikan.** Sesudah Download All BOM selesai, login dan buka panel **Excel Export–Import BOM Lokal** pada dashboard.
+
+1. Pilih workspace dengan snapshot aktif.
+2. Klik **Download Excel BOM**. Workbook berisi tiga sheet: `BOM Lines` (data dan kolom edit), `Instructions` (petunjuk), dan `Product Catalog` (Product ID/SKU/nama untuk memilih pengganti).
+3. Di sheet `BOM Lines`, **hanya ubah kolom F** `new_component_product_id` dan/atau **kolom H** `new_qty`. Komponen dan qty boleh tetap sama atau berubah secara independen. **Jangan mengubah kolom ID, menambah atau menghapus baris.**
+4. Klik **Upload & Preview Perubahan**, pilih file `.xlsx` hasil edit. Backend memeriksa seluruh baris terhadap working BOM terkini dan menampilkan ringkasan perubahan, maksimal 100 contoh dan peringatan. File yang tidak valid **ditolak seluruhnya**.
+5. Setelah memeriksa perubahan, klik **Apply to Local**. Perubahan diterapkan **atomik pada versi kerja BOM di SQLite**, tanpa menyentuh snapshot asli maupun server Odoo.
+6. Download Excel lagi jika ingin melihat nilai working terkini; kolom `original_...` mencerminkan versi lokal saat ekspor. Riwayat penerapan lokal dan jumlah baris dengan override terlihat pada panel.
+
+**Contoh:** Product ID 123 qty 2 → Product ID 123 qty 5 (qty saja); Product ID 123 qty 2 → Product ID 456 qty 2 (komponen saja); Product ID 123 qty 2 → Product ID 456 qty 5 (keduanya).
+
+### Keamanan dan pembatasan
+
+- **Administrator**, **Workspace Admin** dan **Editor** dapat upload, preview, dan Apply to Local sesuai workspace; Viewer hanya dapat download Excel.
+- Jika file telah usang karena snapshot baru atau perubahan working BOM sejak ekspor, preview/Apply ditolak; lakukan export ulang.
+- Kolom identitas diverifikasi terhadap SQLite. Nilai komponen tujuan wajib ada di snapshot workspace yang sama. Qty harus lebih dari nol dan maksimal 12 angka desimal.
+- Perbedaan company, produk arsip, atau default UOM akan ditampilkan sebagai peringatan. Perbedaan kategori UOM yang diketahui **ditolak**, tidak ada konversi qty otomatis.
+- File Excel dibatasi 12 MB, maksimum 100.000 BOM Lines, formula pada sheet `BOM Lines` ditolak.
+- Preview berlaku 60 menit dan hanya dapat diterapkan sekali oleh user yang meng-uploadnya.
+- Edit lokal tersimpan pada `local_bom_working` dan audit batch `local_excel_apply_batches`/`local_excel_change_rows`. Snapshot `sync_records` tidak pernah diubah oleh modul ini.
+- Proses Excel **tidak mengakses Odoo**. Mekanisme update ke Odoo **belum dibahas** dan tidak termasuk fitur ini.
+
+### API Excel lokal
+
+| Method | Endpoint | Keterangan |
+|---|---|---|
+| GET | `/api/v1/workspaces/{wid}/excel/export` | Unduh template BOM lokal `.xlsx` |
+| POST | `/api/v1/workspaces/{wid}/excel/preview` | Upload multipart `file`, validasi + preview |
+| POST | `/api/v1/workspaces/{wid}/excel/preview/{token}/apply` | Apply perubahan ke SQLite lokal |
+| GET | `/api/v1/workspaces/{wid}/excel/working-summary` | Status overlay dan riwayat penerapan |
+
+### Upgrade Debian (tanpa menghilangkan data)
+
+```bash
+cd ~/odoo-tools-
+git pull --ff-only origin main
+docker compose up -d --build
+docker compose ps
+```
+
+**Jangan** menjalankan `docker compose down -v` dan **jangan** mengganti `BOM_ENCRYPTION_KEY`. Administrator, workspace, API Key, serta snapshot lokal yang sudah ada tetap dipertahankan dalam Docker volume.
+
 ### Modul yang sudah ada
 
 - Login/logout dengan sesi HttpOnly cookie, CSRF token, Argon2id password hash, expiry, dan pembatasan percobaan login.
@@ -172,4 +216,4 @@ docker compose down        # stop, data tetap tersimpan
 
 ## Berikutnya
 
-Selanjutnya bangun **Download Excel → Edit Component dan/atau Qty → Upload Excel → Preview → Apply to Local**. Excel mengubah **working BOM pada SQLite lokal**, bukan Odoo. Snapshot mentah tetap utuh dan hasil edit tercatat sebagai revisi lokal. **Mekanisme update ke Odoo belum dibahas dan tidak boleh diimplementasikan pada fase Excel ini.** Spesifikasi detail: [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md#8a-alur-perubahan-bom-via-excel--hanya-database-lokal).
+Gunakan modul Excel lokal untuk menguji editing komponen/qty pada satu atau beberapa BOM Lines. Setelah berhasil, kembangkan tampilan pencarian/Where Used terhadap **working BOM lokal**, tanpa melibatkan update Odoo.
