@@ -1,6 +1,6 @@
 # Odoo 19 BOM Tools
 
-Fondasi aplikasi BOM lokal berbasis **FastAPI + SQLite + Docker Compose**. Tahap ini menyediakan login Administrator, pengelolaan akun, pemilihan workspace, dan pembatasan akses awal. **Pengaturan koneksi Odoo per workspace dan Test Connection JSON-2 read-only sudah tersedia.** Fitur download dan perubahan BOM **belum diimplementasikan**. Desain lengkap: [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md).
+Fondasi aplikasi BOM lokal berbasis **FastAPI + SQLite + Docker Compose**. Aplikasi menyediakan login Administrator, pengelolaan akun, pemilihan workspace, koneksi JSON-2 Odoo, serta **Download All BOM** ke SQLite lokal dengan proses worker dan monitoring. **Tidak ada fitur menulis/mengubah BOM di Odoo.** Desain lengkap: [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md).
 
 ## Jalankan dengan Docker
 
@@ -58,6 +58,54 @@ Buka `http://localhost:700/`, login Administrator, pilih **Pengaturan koneksi Od
 - Hanya **Administrator** dan **Workspace Admin** yang boleh mengatur/menguji koneksi workspace. Pengguna lain ditolak oleh backend.
 - Kode ini belum memanggil `write/create/unlink` ke Odoo dan belum menjalankan download massal.
 
+## Download All BOM (worker read-only)
+
+Sesudah Test Connection semua model utama berstatus `readable`, buka dashboard dan cari bagian **Download All BOM**.
+
+1. Pilih workspace yang koneksi Odoo-nya sudah disimpan.
+2. Klik **Download All BOM**, lalu konfirmasi. API segera mengembalikan `202 Accepted` beserta ID pekerjaan.
+3. Docker service `worker` mengambil job dari SQLite. Antarmuka menampilkan status `queued/running/completed/incomplete/failed`, model yang diproses, record yang sudah diunduh, dan riwayat.
+4. Tunggu status **Selesai — snapshot aktif**. Ringkasan snapshot lokal menampilkan jumlah record tiap model. **Tidak ada perubahan pada Odoo**.
+5. Jika gagal, snapshot yang sebelumnya aktif **tidak diganti**. Periksa status dan `docker compose logs -f worker`, lalu ulangi download sesudah memperbaiki penyebabnya.
+
+**Cakupan awal:** semua record yang terlihat oleh akun API dalam model inti `mrp.bom`, `mrp.bom.line`, `product.product`, `product.template`, dan `uom.uom`; model tambahan `res.company`, `mrp.bom.byproduct`, serta `mrp.routing.workcenter` diambil jika tersedia/diizinkan. `active_test=false` digunakan agar arsip yang boleh diakses tidak terlewat. Field yang diambil dipilih dari daftar aman menggunakan `fields_get`. ID asli Odoo dan payload JSON hasil unduhan dipertahankan dalam snapshot.
+
+**Validasi:** dibandingkan count server sebelum/sesudah, jumlah baris yang diunduh, watermark `write_date` bila tersedia, keunikan ID, serta relasi BOM-line, komponen-produk, template produk, dan UOM. Jika data berubah saat download, proses ditandai `incomplete` dan dapat diulang. Pengecekan ini **bukan backup atomik Odoo** dan tidak menjamin tidak ada perubahan selama setiap halaman diambil.
+
+Untuk jumlah data besar, pengunduhan dilakukan dengan cursor `id` dan batch 250 baris per request; koneksi HTTPS tidak melakukan redirect. Hanya satu job aktif per workspace; worker diproses serial. Snapshot staging tidak dapat diakses pengguna sampai lolos validasi. SQLite tetap berada dalam Docker volume `bom_data` dan tidak pernah dimasukkan ke repository.
+
+### API monitoring
+
+Semua endpoint membutuhkan login; tindakan memulai sync memerlukan Administrator atau Workspace Admin.
+
+| Method | Path | Fungsi |
+|---|---|---|
+| `POST` | `/api/v1/workspaces/{wid}/sync/runs` | Antrekan full download, HTTP 202 |
+| `GET` | `/api/v1/workspaces/{wid}/sync/runs` | Riwayat 20 job terakhir |
+| `GET` | `/api/v1/workspaces/{wid}/sync/runs/{run_id}` | Progres per model dan error aman |
+| `GET` | `/api/v1/workspaces/{wid}/sync/snapshots/current` | Statistik snapshot aktif |
+
+### Upgrade dari versi sebelumnya
+
+Di server Debian yang **sudah memiliki Administrator dan workspace**:
+
+```bash
+cd ~/odoo-tools-
+git pull --ff-only origin main
+docker compose up -d --build
+docker compose ps
+```
+
+Tidak perlu membuat Administrator ulang, tidak perlu mengganti `BOM_ENCRYPTION_KEY`, dan **jangan menggunakan `docker compose down -v`**. Kunci enkripsi yang sudah tersimpan harus tetap sama agar API Key Odoo yang ada masih dapat didekripsi.
+
+Jika job berjalan lama, lihat:
+
+```bash
+docker compose logs -f worker
+```
+
+Port browser tetap `http://localhost:700/` pada host; Docker memetakan localhost port `700` ke container `8080`.
+
 ### Modul yang sudah ada
 
 - Login/logout dengan sesi HttpOnly cookie, CSRF token, Argon2id password hash, expiry, dan pembatasan percobaan login.
@@ -67,7 +115,7 @@ Buka `http://localhost:700/`, login Administrator, pilih **Pengaturan koneksi Od
 - Setiap user dapat mengganti password sendiri; sesi aktif dicabut saat perubahan password.
 - Workspace dapat dibuat Administrator; membership dapat ditetapkan Administrator (implementasi awal backend API).
 - SQLite berada di volume Docker `bom_data`, bukan di repository; log audit merekam tindakan penting.
-- `/docs` menampilkan spesifikasi endpoint termasuk konfigurasi koneksi dan Test Connection per workspace. Layanan worker terpisah sudah tersedia sebagai kerangka; **sync BOM Odoo belum diimplementasikan**.
+- `/docs` menampilkan endpoint koneksi Odoo dan sync per workspace. Worker melakukan unduhan read-only dengan validasi snapshot.
 
 ### Pengujian lokal (tanpa Docker)
 
@@ -95,4 +143,4 @@ docker compose down        # stop, data tetap tersimpan
 
 ## Berikutnya
 
-Lanjutkan dengan worker **full download BOM** read-only menggunakan koneksi workspace yang sudah diuji, dengan staging, validasi, dan aktivasi snapshot SQLite lokal.
+Selanjutnya tambahkan **Local Query Engine**: cari ID komponen X di semua baris BOM dari snapshot aktif, lalu rancangkan perubahan massal X → Y sebagai change set terpisah tanpa mengubah snapshot asli.
