@@ -17,3 +17,7 @@ jobs:
         run: python -m pip install -e ".[dev]"
       - name: Run tests
         run: python -m pytest -q
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+      - name: Build Docker image
+        run: docker build -t odoo-bom-tools:test .
