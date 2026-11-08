@@ -336,6 +336,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         initialize(settings.db_path)
         from .odoo_connection import initialize_schema
         initialize_schema(settings.db_path)
+        from .sync import initialize_sync_schema
+        initialize_sync_schema(settings.db_path)
         yield
 
     application = FastAPI(title="Odoo 19 BOM Tools", version="0.1.0", lifespan=lifespan)
@@ -344,6 +346,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     add_routes(application)
     from .odoo_connection import router_for
     application.include_router(router_for(workspace_access, require_ready, csrf_guard, db_path))
+    from .sync_api import router_for as sync_router_for
+    application.include_router(sync_router_for(workspace_access, require_ready, csrf_guard, db_path))
     return application
 
 
