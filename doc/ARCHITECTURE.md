@@ -1,6 +1,6 @@
 # ARCHITECTURE — Odoo 19 BOM Tools
 
-**Status:** Implementasi M1–M3 v0.7 (tetap perlu validasi pada instance Odoo nyata)  
+**Status:** Implementasi M1–M3 v0.8; spesifikasi Excel edit lokal (belum diimplementasikan)  
 **Tanggal:** 2026-11-09  
 **Repository:** [yussyakmal-dotcom/odoo-tools-](https://github.com/yussyakmal-dotcom/odoo-tools-)  
 **Target:** Odoo 19 SaaS, paket Custom  
@@ -437,6 +437,41 @@ Uji yang wajib mencakup: BOM tanpa line, penggunaan satu komponen dalam banyak B
 - Untuk fase write-back: `WRITE_BACK_ENABLED=false` sebagai default, konfirmasi eksplisit, audit log, dan kemampuan dry-run.
 - Repository tidak menyimpan salinan BOM produksi ataupun file SQLite nyata.
 
+## 8A. Alur perubahan BOM via Excel — **hanya database lokal**
+
+**Keputusan user:** Excel digunakan untuk proses memperbarui **komponen dan qty di BOM lokal**, bukan mengirim perubahan ke Odoo. Mekanisme update ke Odoo **belum didiskusikan**, karena itu berada **di luar lingkup** milestone berikutnya.
+
+### Proses yang akan dibangun
+
+1. User memilih workspace dan men-download Excel BOM Lines hasil snapshot lokal (semua atau sesuai filter).
+2. User mengedit **komponen dan/atau qty**. Keduanya independen: dapat mengubah komponen saja, qty saja, keduanya, atau tidak ada perubahan.
+3. User meng-upload file Excel ke aplikasi; backend memvalidasi seluruh baris dan menampilkan preview/diff. **Upload sendiri tidak langsung mengubah data.**
+4. Setelah konfirmasi **Apply to Local**, perubahan disimpan secara atomik di working version SQLite workspace tersebut.
+5. Search/BOM Explorer lokal bisa menampilkan versi kerja yang baru; **snapshot unduhan asli tetap immutable** sebagai referensi dan opsi pemulihan. Kedua versi tidak boleh disamakan dengan kondisi terbaru Odoo.
+
+### Struktur kolom file Excel
+
+| Kolom | Edit? | Keterangan |
+|---|---|---|
+| `workspace_id`, `snapshot_id` | Tidak | Scope dan versi sumber |
+| `bom_id`, `bom_line_id` | Tidak | Identitas BOM & baris Odoo untuk pemetaan lokal |
+| `original_component_product_id`, `original_qty` | Tidak | Data sumber untuk perbandingan |
+| `new_component_product_id` | Ya | Komponen tujuan; boleh tetap sama |
+| `new_qty` | Ya | Kuantitas tujuan; boleh tetap sama |
+| `uom_id` | Tidak untuk tahap ini | Satuan yang dipakai; perlu validasi saat komponen berubah |
+| `bom_name`, `component_name`, `sku` | Tidak | Informasi agar Excel mudah digunakan |
+
+Satu baris = satu `bom_line_id`. Tidak boleh ada ID BOM Line palsu/duplikat atau perubahan kolom identitas. Tidak ada create/delete line pada versi awal. Jumlah harus numerik finite dan positif; bila kebutuhan qty nol muncul, bahas tersendiri. Product ID tujuan harus ada di snapshot workspace yang sama. Validasi kesesuaian UOM, company, varian, status aktif, dan perubahan data sejak ekspor. Tampilkan error baris spesifik sebelum user boleh Apply.
+
+### Keamanan dan audit
+
+- Akses workspace selalu dicek backend. Administrator memiliki akses penuh sesuai aturan fase development, role lain memerlukan izin edit lokal.
+- Upload Excel dibatasi ukuran/baris, tanpa mengeksekusi formula; nama dan SKU untuk tampilan, bukan identitas utama.
+- Simpan perubahan lokal dan riwayat/diff dalam tabel working revisions atau change sets; dokumentasikan actor, waktu, snapshot asal, nilai lama/baru.
+- Update SQLite **atomik**: tidak boleh menerapkan sebagian baris diam-diam ketika ada error.
+- **Tidak ada request Odoo create/write/unlink selama download/upload/preview/Apply to Local.**
+- Mekanisme update kembali ke Odoo ditunda sampai keputusan desain baru dari user.
+
 ## 9. Struktur repository yang direncanakan
 
 ```text
@@ -504,20 +539,20 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 - Validasi integrity/completeness, publish snapshot aktif, dan laporan.
 - Hasil: **Tahap 1 selesai**. Ringkasan snapshot dapat dibaca melalui FastAPI dan query lokal sudah dapat digunakan.
 
-### Milestone M4 — Local analysis
+### Milestone M4 — Cari BOM + Download Excel
 
-- Pencarian ID X di semua BOM, jumlah dan daftar BOM terdampak.
-- Semua query dijalankan lokal.
+- Pencarian dan Where Used lokal, lalu ekspor BOM Lines ke Excel termasuk kolom editable komponen dan qty.
+- Tidak ada penulisan ke Odoo.
 
-### Milestone M5 — Change sets / transform
+### Milestone M5 — Upload Excel + Update Working BOM Lokal
 
-- Rancang X → Y, preview dan validasi (UOM, company, varian, duplikasi line, produk tidak aktif).
-- Snapshot asli tetap immutable.
+- Upload Excel, validasi ID/produk/qty/UOM, preview diff, lalu Apply to Local.
+- Komponen dan qty dapat diubah masing-masing atau bersama, dengan snapshot asli tetap immutable.
+- Seluruh perubahan dan versinya disimpan di SQLite lokal per workspace.
 
-### Milestone M6 — Safe write-back
+### Milestone M6 — Update ke Odoo (belum didiskusikan)
 
-- Re-read kondisi Odoo, conflict detection, approval, update selektif, audit dan verification.
-- Karena setiap panggilan JSON-2 adalah transaksi terpisah, operasi lintas banyak record harus memiliki mekanisme partial-failure dan recovery.
+- **Jangan dikembangkan dulu**. Mekanisme update ke Odoo harus dibahas dan disetujui pada tahap terpisah.
 
 ## 11. Keputusan terbuka (diuji sebelum coding M1/M2)
 
@@ -541,7 +576,8 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 - **API Key Odoo harus dienkripsi at rest** memakai secret server terpisah, tanpa endpoint baca kunci.
 - **Tidak ada klaim “semua data” tanpa cakupan dan laporan validasi.**
 - **Satu kegagalan sinkronisasi tidak boleh merusak snapshot terakhir yang valid.**
-- **Write-back hanya setelah preview, validasi, persetujuan, dan conflict check.**
+- **Ekspor Excel → Upload Excel → Preview → Apply hanya mengubah working version lokal.**
+- **Mekanisme update ke Odoo belum didiskusikan; tidak termasuk implementasi Excel lokal.**
 
 ---
 
