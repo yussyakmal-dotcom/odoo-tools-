@@ -58,6 +58,35 @@ Buka `http://localhost:700/`, login Administrator, pilih **Pengaturan koneksi Od
 - Hanya **Administrator** dan **Workspace Admin** yang boleh mengatur/menguji koneksi workspace. Pengguna lain ditolak oleh backend.
 - Kode ini belum memanggil `write/create/unlink` ke Odoo dan belum menjalankan download massal.
 
+
+### Jika konfigurasi Odoo tampak hilang setelah refresh atau upgrade
+
+1. Pastikan **workspace yang dipilih benar**. Aplikasi sekarang mengingat workspace terakhir yang dipilih pada browser ini; API Key tidak pernah ditampilkan kembali demi keamanan.
+2. Jika label menyatakan **API Key tersimpan di server** dan URL Odoo tampil, koneksi **masih tersimpan** meskipun input password terlihat kosong.
+3. Jika URL dan label penyimpanan kosong pada workspace yang benar, cek database SQLite di volume **tanpa menampilkan API Key**:
+
+```bash
+cd ~/odoo-tools-
+docker compose exec -T api python - <<'PY'
+from odoo_tools.config import Settings
+from odoo_tools.db import open_db
+
+with open_db(Settings.from_env().db_path) as db:
+    rows = db.execute("""
+        SELECT w.id, w.name,
+               CASE WHEN c.workspace_id IS NULL THEN 'TIDAK ADA' ELSE 'TERSIMPAN' END,
+               COALESCE(c.last_test_status, 'belum diuji')
+        FROM workspaces w
+        LEFT JOIN workspace_odoo_connections c ON c.workspace_id = w.id
+        ORDER BY w.id
+    """).fetchall()
+    for row in rows:
+        print(f"Workspace {row[0]} ({row[1]}): koneksi {row[2]}, tes {row[3]}")
+PY
+```
+
+Jika hasilnya `TERSIMPAN`, jangan membuat API Key baru: periksa pemilihan workspace dan refresh browser. Jika `TIDAK ADA`, cari tahu lebih dulu apakah Docker volume/proyek berubah; **jangan jalankan `docker compose down -v` atau regenerasi kunci enkripsi**. Perintah ini hanya membaca metadata, bukan nilai API Key.
+
 ## Download All BOM (worker read-only)
 
 Sesudah Test Connection semua model utama berstatus `readable`, buka dashboard dan cari bagian **Download All BOM**.
