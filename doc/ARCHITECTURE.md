@@ -1,6 +1,6 @@
 # ARCHITECTURE — Odoo 19 BOM Tools
 
-**Status:** Draft v0.6  
+**Status:** Implementasi M1–M3 v0.7 (tetap perlu validasi pada instance Odoo nyata)  
 **Tanggal:** 2026-11-09  
 **Repository:** [yussyakmal-dotcom/odoo-tools-](https://github.com/yussyakmal-dotcom/odoo-tools-)  
 **Target:** Odoo 19 SaaS, paket Custom  
@@ -341,11 +341,30 @@ Mitigasi:
 - Jika tidak bisa membuktikan cakupan stabil, laporkan `incomplete / unstable`. Jangan klaim *100% identical* secara berlebihan.
 - Untuk operasi write-back kelak, **re-read record server tepat sebelum update** dan tolak jika tidak cocok dengan baseline yang disetujui.
 
+## 5A. Implementasi Sync Worker dan monitoring
+
+**Sudah diimplementasikan** di `src/odoo_tools/sync.py`, `sync_api.py`, `worker.py` dan halaman dashboard `static/sync.js`.
+
+- **Job queue:** `POST /api/v1/workspaces/{wid}/sync/runs` menyimpan `sync_runs` berstatus queued dan mengembalikan HTTP 202. Hanya Administrator atau Workspace Admin yang boleh membuat job; role Viewer/Editor dapat membaca monitoring workspace tetapi tidak memulai sync.
+- **Worker:** satu service Docker worker mengambil job secara serial. Status per-model pada `sync_model_progress` dan polling UI setiap 2 detik; restart worker menandai job running yang terputus sebagai failed, tidak mengubah snapshot terakhir.
+- **Paging:** `search_read` `id asc`, domain `id > cursor`, `limit=250`, `active_test=false`. Model dan field disaring dengan `fields_get`. Semua record yang terlihat oleh izin API dibaca dari model inti; tiga model tambahan diambil jika tersedia.
+- **Penyimpanan:** tabel `sync_snapshots` (`staging/active/retired/invalid`) dan `sync_records` (`snapshot_id`, `model`, `odoo_id`, referensi utama dan `raw_json`); snapshot tidak diubah setelah aktif. Indeks relasi komponen dan BOM tersedia.
+- **Validasi:** count sebelum/akhir, `write_date` watermark jika tersedia, ID unik, dan relasi BOM line → BOM header, komponen → product.product, hasil BOM → product.template serta komponen UOM → uom.uom. Jika berbeda, snapshot tidak dipublikasikan dan diberi state failed/incomplete.
+- **Publish:** dalam transaksi SQLite, snapshot aktif sebelumnya menjadi retired hanya bila staging lolos, lalu staging menjadi active. Snapshot gagal tidak ditampilkan sebagai aktif; record staging invalid dibersihkan.
+- **API monitoring:** GET `/api/v1/workspaces/{wid}/sync/runs`, GET `/runs/{run_id}`, dan GET `/snapshots/current` semuanya di-scope workspace. UI menampilkan progres model, riwayat dan hitungan snapshot aktif.
+- **Read-only Odoo:** hanya `fields_get`, `search_count`, dan `search_read`. Tidak ada `write`, `create`, `unlink`, ataupun update BOM. Konfigurasi koneksi per workspace dipakai lewat server, API Key didekripsi hanya di worker.
+
+**Batasan:** API JSON-2 berjalan dalam transaksi per request; full download dengan paging bukan snapshot atomik Odoo. Count dan watermark meminimalkan drift, tetapi tidak membuktikan konsistensi sempurna saat transaksi lain mengubah record. Untuk laporan `completed`, hasil harus tetap dipahami sebagai *snapshot terverifikasi menurut pemeriksaan tersebut*, bukan backup database Odoo pada satu titik waktu. Pengujian dengan Odoo nyata harus dilakukan sebelum menyebut data sepenuhnya sesuai produksi.
+
+### Skema aktual vs rancangan lanjutan
+
+Implementasi pertama menggunakan `sync_records` generik dengan `model` dan kolom relasi yang diindeks, bukan tabel `bom_headers` / `bom_lines` terpisah yang direncanakan pada bagian 6. Pendekatan ini menyimpan payload Odoo tanpa kehilangan field yang telah diunduh, sekaligus memungkinkan query perkomponen lokal. Tabel khusus, migrasi skema, dan indeks tambahan dapat dibuat ketika Local Query Engine dikembangkan.
+
 ## 6. Desain penyimpanan lokal
 
 Gunakan SQLite dengan foreign key aktif dan indeks khusus untuk pencarian komponen.
 
-Tabel inti yang diusulkan:
+Tabel inti rancangan jangka lanjut (implementasi awal memakai tabel snapshot generik sebagaimana dijelaskan pada bagian 5A):
 
 | Tabel | Isi |
 |---|---|
@@ -474,13 +493,13 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 - Endpoint `/api/v1/health` dan `/api/v1/workspaces/{id}/connection/test` dapat diuji tanpa mengubah data Odoo.
 - Hasil: laporan preflight; **tidak ada perubahan di Odoo**.
 
-### Milestone M2 — Async sync job + full download + SQLite
+### Milestone M2 — Async sync job + full download + SQLite (kode telah dibuat)
 
 - `POST /api/v1/workspaces/{id}/sync/runs` mengantrekan pekerjaan untuk workspace berizin, worker memprosesnya, dan endpoint status melaporkan progres.
 - Download seluruh header BOM, BOM lines, produk/template, UOM, dan referensi yang diperlukan.
 - Hasil: snapshot staging SQLite yang dapat dihitung dan di-query.
 
-### Milestone M3 — Validation + snapshot publish
+### Milestone M3 — Validation + snapshot publish (kode telah dibuat; uji Odoo nyata berikutnya)
 
 - Validasi integrity/completeness, publish snapshot aktif, dan laporan.
 - Hasil: **Tahap 1 selesai**. Ringkasan snapshot dapat dibaca melalui FastAPI dan query lokal sudah dapat digunakan.
@@ -530,4 +549,4 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 
 - Odoo 19, *External JSON-2 API*: https://www.odoo.com/documentation/19.0/developer/reference/external_api.html
 
-**Status pekerjaan:** Dokumen arsitektur dibuat sebagai draft awal untuk ditinjau. Implementasi tahap 1 dan pengujian koneksi Odoo belum dilakukan.
+**Status pekerjaan:** Fondasi FastAPI, Docker, login/workspace, koneksi JSON-2 per workspace dan full download read-only beserta validasi/monitoring sudah diimplementasikan. Test Connection terhadap instance Odoo pengguna dinyatakan berhasil; uji full download pada instance tersebut belum dilakukan.
