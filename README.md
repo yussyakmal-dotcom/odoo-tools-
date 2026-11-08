@@ -157,6 +157,7 @@ Port browser tetap `http://localhost:700/` pada host; Docker memetakan localhost
 - File Excel dibatasi 12 MB, maksimum 100.000 BOM Lines, formula pada sheet `BOM Lines` ditolak.
 - Preview berlaku 60 menit dan hanya dapat diterapkan sekali oleh user yang meng-uploadnya.
 - Edit lokal tersimpan pada `local_bom_working` dan audit batch `local_excel_apply_batches`/`local_excel_change_rows`. Snapshot `sync_records` tidak pernah diubah oleh modul ini.
+- **Perubahan lokal melekat pada snapshot asal.** Jika Download All BOM dijalankan ulang, snapshot baru menjadi aktif dan tidak otomatis mewarisi perubahan lokal dari snapshot lama. Riwayat lama tetap tersimpan; jangan menyinkronkan ulang sebelum memastikan bagaimana revisi lokal akan dipertahankan atau diterapkan ke snapshot baru.
 - Proses Excel **tidak mengakses Odoo**. Mekanisme update ke Odoo **belum dibahas** dan tidak termasuk fitur ini.
 
 ### API Excel lokal
