@@ -461,7 +461,7 @@ Uji yang wajib mencakup: BOM tanpa line, penggunaan satu komponen dalam banyak B
 | `uom_id` | Tidak untuk tahap ini | Satuan yang dipakai; perlu validasi saat komponen berubah |
 | `bom_name`, `component_name`, `sku` | Tidak | Informasi agar Excel mudah digunakan |
 
-Satu baris = satu `bom_line_id`. Tidak boleh ada ID BOM Line palsu/duplikat atau perubahan kolom identitas. Tidak ada create/delete line pada versi awal. Jumlah harus numerik finite dan positif; bila kebutuhan qty nol muncul, bahas tersendiri. Product ID tujuan harus ada di snapshot workspace yang sama. Validasi kesesuaian UOM, company, varian, status aktif, dan perubahan data sejak ekspor. Tampilkan error baris spesifik sebelum user boleh Apply.
+Satu baris = satu `bom_line_id`. Tidak boleh ada ID BOM Line palsu/duplikat atau perubahan kolom identitas. Tidak ada create/delete line pada versi awal. Qty asli hasil Odoo boleh 0 dan mempertahankan presisi asal saat ekspor (disimpan sebagai teks Excel agar tidak dibulatkan). Qty baru boleh 0 dengan peringatan, tidak boleh negatif, dan jika nilainya diubah dibatasi paling banyak 12 angka desimal; qty asli yang tidak berubah tidak dipaksa memenuhi aturan input baru. Product ID tujuan harus ada di snapshot workspace yang sama. Validasi kesesuaian UOM, company, varian, status aktif, dan perubahan data sejak ekspor. Tampilkan error baris spesifik sebelum user boleh Apply.
 
 ### Keamanan dan audit
 
