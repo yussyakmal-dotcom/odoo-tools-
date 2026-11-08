@@ -26,6 +26,7 @@ async function render(){
   for(const w of me.workspaces){const row=document.createElement('div');row.className='workspace-item';row.append(text('strong',w.name),text('small',w.slug+' · '+(w.role||'Administrator')));$('workspaces').append(row);}
   await refreshConnectionPanel(me.workspaces);
   await refreshSyncPanel(me.workspaces);
+  await refreshExcelPanel(me.workspaces);
   if(currentUser.is_admin && !currentUser.must_change_password){const users=await api('/admin/users');$('users').replaceChildren();for(const u of users){const tr=document.createElement('tr');for(const value of [u.username,u.display_name,u.is_admin?'Administrator':'User',u.is_active?'Aktif':'Nonaktif'])tr.append(text('td',value));$('users').append(tr);}}
   if(currentUser.must_change_password) showMessage('Password awal harus diganti sebelum menggunakan fitur lain.');
 }
