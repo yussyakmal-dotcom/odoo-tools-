@@ -241,7 +241,7 @@ def _sheet_xml(headers: tuple[str, ...], rows: list[list[object]]) -> bytes:
     return "".join(pieces).encode("utf-8")
 
 
-def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict]) -> bytes:
+def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict], catalog: list[list[object]]) -> bytes:
     rows: list[list[object]] = []
     for line in lines:
         values: list[object] = []
@@ -260,6 +260,7 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict]) -> b
         ["LANGKAH 2", "Jangan mengubah/hapus/tambah baris atau ID. Urutan baris boleh diubah."],
         ["LANGKAH 3", "Upload Excel ke aplikasi, periksa preview, lalu tekan Apply to Local."],
         ["CATATAN", "Qty > 0; Product ID harus tersedia pada snapshot yang sama."],
+        ["KATALOG PRODUK", "Gunakan sheet Product Catalog untuk memilih Product ID pengganti."],
         ["KEAMANAN", "Snapshot Odoo asli tetap utuh; perubahan hanya di working BOM lokal."],
     ]
     ct = (
@@ -275,6 +276,8 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict]) -> b
         'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
         '<Override PartName="/xl/worksheets/sheet2.xml" '
         'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet3.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
         '</Types>'
     )
     root_rels = (
@@ -289,7 +292,8 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict]) -> b
         f'<workbook xmlns="{NS}" '
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
         '<sheets><sheet name="BOM Lines" sheetId="1" r:id="rId1"/>'
-        '<sheet name="Instructions" sheetId="2" r:id="rId2"/></sheets></workbook>'
+        '<sheet name="Instructions" sheetId="2" r:id="rId2"/>'
+        '<sheet name="Product Catalog" sheetId="3" r:id="rId4"/></sheets></workbook>'
     )
     workbook_rels = (
         '<?xml version="1.0" encoding="utf-8"?>'
@@ -302,7 +306,10 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict]) -> b
         'Target="worksheets/sheet2.xml"/>'
         '<Relationship Id="rId3" '
         'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
-        'Target="styles.xml"/></Relationships>'
+        'Target="styles.xml"/>'
+        '<Relationship Id="rId4" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet3.xml"/></Relationships>'
     )
     styles = (
         '<?xml version="1.0" encoding="utf-8"?>'
@@ -330,6 +337,8 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict]) -> b
             ("xl/styles.xml", styles),
             ("xl/worksheets/sheet1.xml", _sheet_xml(COLUMNS, rows)),
             ("xl/worksheets/sheet2.xml", _sheet_xml(("Petunjuk", "Keterangan"), notes)),
+            ("xl/worksheets/sheet3.xml", _sheet_xml(
+                ("Product ID", "SKU", "Product Name", "Default UOM ID", "Active"), catalog)),
         ):
             z.writestr(name, value)
     return buffer.getvalue()
