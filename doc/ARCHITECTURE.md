@@ -470,6 +470,7 @@ Satu baris = satu `bom_line_id`. Tidak boleh ada ID BOM Line palsu/duplikat atau
 - Simpan perubahan lokal dan riwayat/diff dalam tabel working revisions atau change sets; dokumentasikan actor, waktu, snapshot asal, nilai lama/baru.
 - Update SQLite **atomik**: tidak boleh menerapkan sebagian baris diam-diam ketika ada error.
 - **Tidak ada request Odoo create/write/unlink selama download/upload/preview/Apply to Local.**
+- Working edits melekat pada `snapshot_id`. Download Odoo berikutnya menghasilkan snapshot aktif baru tanpa otomatis membawa edit lama; kebijakan rebase/migrasi edit antarsnapshot harus dirancang terpisah sebelum dipakai rutin.
 - Mekanisme update kembali ke Odoo ditunda sampai keputusan desain baru dari user.
 
 ### Status implementasi saat ini
