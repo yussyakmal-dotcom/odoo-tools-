@@ -19,7 +19,7 @@ Aplikasi: **http://localhost:700/**, Swagger: **http://localhost:700/docs**, hea
 Satu kali sesudah container berjalan, jalankan (terminal interaktif):
 
 ```bash
-docker compose exec -it api python -m odoo_tools.cli create-admin --username administrator
+docker compose exec api python -m odoo_tools.cli create-admin --username administrator
 ```
 
 Password dimasukkan lewat prompt, minimal 12 karakter. **Tidak ada password bawaan.** Perintah bootstrap akan menolak jika Administrator sudah ada. Setelah itu buka `http://localhost:700/` dan login. Ubah password dari menu akun jika diperlukan.
