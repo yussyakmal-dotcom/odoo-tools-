@@ -338,6 +338,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         initialize_schema(settings.db_path)
         from .sync import initialize_sync_schema
         initialize_sync_schema(settings.db_path)
+        from .excel_local import initialize_excel_schema
+        initialize_excel_schema(settings.db_path)
         yield
 
     application = FastAPI(title="Odoo 19 BOM Tools", version="0.1.0", lifespan=lifespan)
@@ -348,6 +350,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(router_for(workspace_access, require_ready, csrf_guard, db_path))
     from .sync_api import router_for as sync_router_for
     application.include_router(sync_router_for(workspace_access, require_ready, csrf_guard, db_path))
+    from .excel_api import router_for as excel_router_for
+    application.include_router(excel_router_for(workspace_access, require_ready, csrf_guard, db_path))
     return application
 
 
