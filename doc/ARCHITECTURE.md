@@ -1,6 +1,6 @@
 # ARCHITECTURE — Odoo 19 BOM Tools
 
-**Status:** Draft v0.2  
+**Status:** Draft v0.3  
 **Tanggal:** 2026-11-09  
 **Repository:** [yussyakmal-dotcom/odoo-tools-](https://github.com/yussyakmal-dotcom/odoo-tools-)  
 **Target:** Odoo 19 SaaS, paket Custom  
@@ -201,7 +201,8 @@ SQLite perlu `PRAGMA foreign_keys=ON`, `busy_timeout`, dan konfigurasi WAL yang 
 
 ### 4A.3 Network, secret, dan operasional
 
-- Default bind hanya ke localhost host: `127.0.0.1:8000:8000`; **jangan expose ke internet** tanpa autentikasi, TLS reverse proxy, dan kontrol akses.
+- **Port akses aplikasi ditetapkan 700 (bukan 8000)**. Docker Compose memetakan **host `127.0.0.1:700` → container `8080`** dengan `ports: ["127.0.0.1:700:8080"]`. Port 8080 hanya dipakai **di dalam container** untuk Uvicorn; URL akses dari host adalah `http://localhost:700`.
+- **Jangan expose ke internet** tanpa autentikasi, TLS reverse proxy, dan kontrol akses. Port host 700 harus diperiksa agar tidak bentrok dengan layanan lain.
 - `ODOO_API_KEY` melalui environment/secrets saat deployment, bukan di Dockerfile/image, repo, URL, atau request body.
 - Contoh konfigurasi aman disediakan pada `.env.example`. File `.env` nyata ditambahkan ke `.gitignore`.
 - Logging ke stdout/stderr Docker, tanpa token dan tanpa dump isi data sensitif.
@@ -415,6 +416,7 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 - **Read-only secara nyata** terhadap Odoo pada tahap pertama.
 - **FastAPI bukan worker sinkronisasi**: unduhan penuh diproses service worker terpisah.
 - **Volume data Docker harus persisten** dan aman dari penghapusan tidak sengaja.
+- **Port publik lokal harus 700**, bukan port default FastAPI 8000.
 - **Tidak ada klaim “semua data” tanpa cakupan dan laporan validasi.**
 - **Satu kegagalan sinkronisasi tidak boleh merusak snapshot terakhir yang valid.**
 - **Write-back hanya setelah preview, validasi, persetujuan, dan conflict check.**
