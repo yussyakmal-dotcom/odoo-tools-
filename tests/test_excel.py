@@ -252,3 +252,115 @@ def test_excel_export_name_with_formula_prefix_remains_text(setup):
     with ZipFile(BytesIO(xlsx)) as z:
         sheet=z.read("xl/worksheets/sheet1.xml")
         assert b"<f>" not in sheet
+
+
+def test_zero_quantity_source_exports_and_is_editable_locally(setup):
+    """An Odoo BOM line with qty=0 must never block a whole workbook export."""
+    client, csrf, wid, path, snap = setup
+    with transaction(path) as db:
+        raw = db.execute(
+            "SELECT raw_json FROM sync_records WHERE snapshot_id=? "
+            "AND model='mrp.bom.line' AND odoo_id=100", (snap,),
+        ).fetchone()[0]
+        line = json.loads(raw)
+        line["product_qty"] = 0.0
+        db.execute(
+            "UPDATE sync_records SET raw_json=? WHERE snapshot_id=? "
+            "AND model='mrp.bom.line' AND odoo_id=100",
+            (json.dumps(line), snap),
+        )
+    original_excel = export(client, wid)
+    rows = parse_workbook(original_excel)
+    assert rows[0][1]["original_qty"] == "0"
+    assert rows[0][1]["new_qty"] == "0"
+    unchanged = upload(client, csrf, wid, original_excel)
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json()["state"] == "no_changes"
+    # Component-only changes may retain source qty=0.
+    edited = edit_excel(original_excel, {"F2": 11})
+    preview = upload(client, csrf, wid, edited)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["changed_count"] == 1
+    applied = apply(client, csrf, wid, preview.json()["preview_token"])
+    assert applied.status_code == 200, applied.text
+    with open_db(path) as db:
+        working = db.execute(
+            "SELECT component_product_id,qty FROM local_bom_working "
+            "WHERE snapshot_id=? AND bom_line_id=100", (snap,),
+        ).fetchone()
+        assert (working["component_product_id"], working["qty"]) == (11, "0")
+        source = json.loads(db.execute(
+            "SELECT raw_json FROM sync_records WHERE snapshot_id=? "
+            "AND model='mrp.bom.line' AND odoo_id=100", (snap,),
+        ).fetchone()[0])
+        assert source["product_qty"] == 0
+    # Re-export from local working version, changing zero to a positive qty.
+    revised = export(client, wid)
+    changed_qty = upload(client, csrf, wid, edit_excel(revised, {"H2": 2.5}))
+    assert changed_qty.status_code == 200, changed_qty.text
+    assert apply(client, csrf, wid, changed_qty.json()["preview_token"]).status_code == 200
+
+
+def test_high_precision_odoo_quantity_remains_exact_through_excel_round_trip(setup):
+    """Original values with >12 fractional digits must not be rounded on export."""
+    client, csrf, wid, path, snap = setup
+    quantity = 0.12345678901234566
+    with transaction(path) as db:
+        raw = db.execute(
+            "SELECT raw_json FROM sync_records WHERE snapshot_id=? "
+            "AND model='mrp.bom.line' AND odoo_id=100", (snap,),
+        ).fetchone()[0]
+        line = json.loads(raw)
+        line["product_qty"] = quantity
+        db.execute(
+            "UPDATE sync_records SET raw_json=? WHERE snapshot_id=? "
+            "AND model='mrp.bom.line' AND odoo_id=100",
+            (json.dumps(line), snap),
+        )
+    raw_excel = export(client, wid)
+    parsed = parse_workbook(raw_excel)
+    assert parsed[0][1]["original_qty"] == str(quantity)
+    assert parsed[0][1]["new_qty"] == str(quantity)
+    assert upload(client, csrf, wid, raw_excel).json()["state"] == "no_changes"
+    # Component change alone is valid; source high-precision qty remains unchanged.
+    modified = edit_excel(raw_excel, {"F2": 11})
+    preview = upload(client, csrf, wid, modified)
+    assert preview.status_code == 200, preview.text
+    assert apply(client, csrf, wid, preview.json()["preview_token"]).status_code == 200
+    with open_db(path) as db:
+        qty = db.execute(
+            "SELECT qty FROM local_bom_working WHERE snapshot_id=? AND bom_line_id=100",
+            (snap,),
+        ).fetchone()[0]
+        assert qty == str(quantity)
+
+
+def test_negative_new_qty_is_rejected_but_zero_new_qty_is_allowed_with_warning(setup):
+    client, csrf, wid, path, snap = setup
+    xlsx = export(client, wid)
+    invalid = upload(client, csrf, wid, edit_excel(xlsx, {"H2": -5}))
+    assert invalid.status_code == 422
+    zero = upload(client, csrf, wid, edit_excel(xlsx, {"H2": 0}))
+    assert zero.status_code == 200, zero.text
+    assert zero.json()["changed_count"] == 1
+    assert zero.json()["warning_count"] == 1
+    assert apply(client, csrf, wid, zero.json()["preview_token"]).status_code == 200
+
+
+def test_missing_source_qty_reports_specific_reason_without_mutating_snapshot(setup):
+    client, csrf, wid, path, snap = setup
+    with transaction(path) as db:
+        line = json.loads(db.execute(
+            "SELECT raw_json FROM sync_records WHERE snapshot_id=? "
+            "AND model='mrp.bom.line' AND odoo_id=100", (snap,),
+        ).fetchone()[0])
+        line["product_qty"] = None
+        db.execute(
+            "UPDATE sync_records SET raw_json=? WHERE snapshot_id=? "
+            "AND model='mrp.bom.line' AND odoo_id=100",
+            (json.dumps(line), snap),
+        )
+    response = client.get(endpoint(wid)+"/export")
+    assert response.status_code == 409
+    assert "BOM line 100" in response.text
+    assert "missing" in response.text
