@@ -9,6 +9,7 @@
   <script defer src="/assets/app.js"></script>
   <script defer src="/assets/connection.js"></script>
   <script defer src="/assets/sync.js"></script>
+  <script defer src="/assets/excel.js"></script>
 </head>
 <body>
   <main class="layout">
@@ -69,6 +70,38 @@
           <div id="sync-snapshot" class="subtle">Belum ada snapshot.</div>
           <h3>Riwayat unduhan</h3>
           <div id="sync-history" class="subtle">Belum ada pekerjaan.</div>
+        </section>
+        <section id="excel-panel" class="panel" hidden>
+          <div class="header-row"><div><h2>Excel Export–Import BOM Lokal</h2>
+            <p class="subtle">Edit Product ID komponen dan/atau qty di Excel. Hasil upload hanya diterapkan pada versi kerja SQLite lokal, bukan Odoo.</p></div>
+            <span class="pill">LOCAL ONLY</span>
+          </div>
+          <label for="excel-workspace">Workspace</label>
+          <select id="excel-workspace" class="select-field"></select>
+          <div class="connection-actions">
+            <button type="button" id="excel-export">Download Excel BOM</button>
+            <button type="button" id="excel-refresh" class="secondary">Refresh Status Lokal</button>
+          </div>
+          <p class="hint">Excel berisi sheet <strong>BOM Lines</strong>, <strong>Instructions</strong>, dan <strong>Product Catalog</strong>. Edit hanya kolom F (new_component_product_id) dan H (new_qty) pada BOM Lines. Jangan menambah/menghapus baris atau mengubah ID.</p>
+          <div id="excel-summary" class="connection-status" role="status" aria-live="polite"></div>
+          <div id="excel-editor-area">
+            <form id="excel-upload-form" class="connection-form">
+              <label for="excel-file">Upload Excel hasil edit (.xlsx)</label>
+              <input type="file" id="excel-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+              <button id="excel-preview-button" type="submit">Upload &amp; Preview Perubahan</button>
+            </form>
+            <section id="excel-preview-section" class="excel-preview" hidden>
+              <h3>Preview perubahan lokal</h3>
+              <p id="excel-preview-headline" class="subtle"></p>
+              <div id="excel-warning-list" class="hint"></div>
+              <div id="excel-change-list" class="table-wrap"></div>
+              <div class="connection-actions">
+                <button id="excel-apply" type="button">Apply to Local</button>
+                <button id="excel-cancel" type="button" class="secondary">Batalkan Preview</button>
+              </div>
+              <p class="hint"><strong>Konfirmasi hanya memperbarui versi kerja di SQLite.</strong> Snapshot Odoo asli tetap utuh; tidak ada request perubahan ke Odoo.</p>
+            </section>
+          </div>
         </section>
         <section class="panel"><h2>Keamanan akun</h2><p class="subtle">Ubah password; seluruh sesi aktif akan berakhir.</p>
           <form id="password-form" class="three-fields"><input id="old-password" type="password" autocomplete="current-password" placeholder="Password saat ini" required><input id="new-password" type="password" autocomplete="new-password" placeholder="Password baru (min. 12)" minlength="12" required><button type="submit">Ganti password</button></form>
