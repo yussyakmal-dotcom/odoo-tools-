@@ -11,3 +11,12 @@
 .key-status{font-size:12px;font-weight:650;margin:2px 0 5px;padding:9px 12px;border-radius:8px;line-height:1.5}
 .key-status.saved{background:#e5f4e9;color:#276b45}
 .key-status.missing{background:#fff4e5;color:#946017}
+
+.excel-preview{margin-top:22px;border-top:1px solid #e4eaf0;padding-top:16px}
+.excel-preview .table-wrap{max-height:420px;overflow-y:auto}
+.excel-preview h3{margin-top:0}
+.excel-preview .hint{line-height:1.7}
+#excel-file{width:100%;border:1px dashed #b7ccd9;background:#f9fbfd}
+#excel-summary{margin-bottom:18px}
+#excel-warning-list{max-height:170px;overflow-y:auto;color:#9b6434;padding:8px 0}
+#excel-change-list td:nth-child(3),#excel-change-list td:nth-child(4){font-variant-numeric:tabular-nums}
