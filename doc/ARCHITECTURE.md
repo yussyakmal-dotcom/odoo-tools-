@@ -1,6 +1,6 @@
 # ARCHITECTURE — Odoo 19 BOM Tools
 
-**Status:** Draft v0.3  
+**Status:** Draft v0.4  
 **Tanggal:** 2026-11-09  
 **Repository:** [yussyakmal-dotcom/odoo-tools-](https://github.com/yussyakmal-dotcom/odoo-tools-)  
 **Target:** Odoo 19 SaaS, paket Custom  
@@ -27,11 +27,14 @@ Alur utama:
 | Pola integrasi | **Local-first, server-authoritative**: Odoo adalah sumber kebenaran; lokal adalah tempat analisis/perencanaan perubahan |
 | Bahasa | Python 3.11+ |
 | Backend API | **FastAPI** (REST API internal; dokumentasi OpenAPI) |
+| Autentikasi | Akun lokal aplikasi, sesi login aman, password hash Argon2id |
+| Otorisasi | Workspace-scoped RBAC; default deny; validasi selalu di backend |
+| Workspace | Scope terpisah untuk koneksi Odoo, snapshot, pekerjaan sync, dan akses anggota |
 | Deployment | **Docker + Docker Compose**, terdiri atas service API dan worker sinkronisasi |
 | Database lokal | SQLite dalam Docker persistent volume (versi pertama) |
 | API Odoo | **External JSON-2 API** Odoo 19: `POST /json/2/<model>/<method>` |
 | Autentikasi | API key pada backend/CLI, tidak pada browser atau repository |
-| Antarmuka awal | Endpoint FastAPI untuk *preflight*, mulai sync, status, dan ringkasan snapshot; GUI bukan prasyarat |
+| Antarmuka awal | FastAPI + UI minimal login, profil/password, manajemen user dan pemilihan workspace; UI BOM lengkap menyusul |
 | Scope tahap 1 | **Read-only**: tidak memanggil `create`, `write`, atau `unlink` |
 | Pola sinkronisasi | FastAPI memasukkan sync job ke antrean lokal; worker terpisah membuat full snapshot *staging*, memvalidasi, lalu mempublikasikan snapshot aktif |
 | Data historis | Snapshot sinkronisasi dan calon perubahan dipisah; tidak menimpa data asli |
@@ -110,7 +113,8 @@ Alur utama:
 
 ### 3.1 Tahap 1 — wajib ada
 
-- Service FastAPI berjalan di Docker dan memiliki endpoint health check, preflight, start sync, serta status sync.
+- Service FastAPI berjalan di Docker dan memiliki endpoint health check, login, administrasi user/workspace, preflight, start sync, serta status sync.
+- Autentikasi dan otorisasi berbasis workspace wajib berlaku untuk seluruh API BOM dan sync.
 - Worker sinkronisasi berjalan sebagai service Docker terpisah dari FastAPI; tidak memproses full download di dalam HTTP request.
 - Koneksi terautentikasi ke database Odoo 19 SaaS Custom.
 - Deteksi kemampuan baca untuk model/field yang dibutuhkan.
@@ -127,7 +131,7 @@ Alur utama:
 
 - Penggantian X → Y, perubahan kuantitas, penghapusan/penambahan baris.
 - Write-back, rollback, pemulihan perubahan di Odoo.
-- UI web, login banyak pengguna, penjadwalan otomatis (FastAPI minimal tetap termasuk tahap 1).
+- UI BOM lengkap, penjadwalan otomatis, SSO/LDAP (login multi-user serta manajemen workspace termasuk fondasi aplikasi).
 - Costing, forecasting, MRP simulation, atau optimasi BOM.
 
 Hal-hal di atas dipertimbangkan dalam desain tetapi **tidak boleh menghambat pengiriman tahap 1**.
@@ -182,19 +186,27 @@ Sebelum menyatakan snapshot lengkap, simpan:
 
 | Method | Endpoint | Hasil |
 |---|---|---|
-| `GET` | `/api/v1/health` | Status backend/container |
-| `POST` | `/api/v1/connection/test` | Pemeriksaan koneksi, model dan hak baca Odoo (tanpa mengembalikan token) |
-| `POST` | `/api/v1/sync/runs` | Buat sync job, balas `202 Accepted` dan `job_id`; tolak job aktif ganda |
-| `GET` | `/api/v1/sync/runs/{job_id}` | Status `queued/running/completed/failed/incomplete`, progres dan pesan error aman |
-| `GET` | `/api/v1/snapshots/current` | Statistik snapshot aktif lokal beserta waktu dan cakupan sync |
+| `GET` | `/api/v1/health` | Status backend/container, tanpa data sensitif |
+| `POST` | `/api/v1/auth/login` | Login user aplikasi, buat sesi |
+| `POST` | `/api/v1/auth/logout` | Logout dan cabut sesi |
+| `GET` | `/api/v1/auth/me` | Profil user dan daftar workspace yang diizinkan |
+| `POST` | `/api/v1/auth/change-password` | User mengganti password dengan password lama |
+| `GET/POST/PATCH` | `/api/v1/admin/users` dan `/api/v1/admin/users/{id}` | Superadmin mengelola user |
+| `POST` | `/api/v1/admin/users/{id}/reset-password` | Reset password dan wajib ganti pada login berikutnya |
+| `GET/POST/PATCH` | `/api/v1/workspaces` dan `/api/v1/workspaces/{id}` | Akses dan pengelolaan workspace sesuai izin |
+| `GET/PUT/DELETE` | `/api/v1/workspaces/{id}/memberships` | Mengelola user/role per workspace |
+| `POST` | `/api/v1/workspaces/{id}/connection/test` | Uji koneksi Odoo dalam workspace yang berizin (tanpa membocorkan token) |
+| `POST` | `/api/v1/workspaces/{id}/sync/runs` | Enqueue job scoped workspace, `202 Accepted` dan `job_id`; tolak job aktif ganda dalam workspace |
+| `GET` | `/api/v1/workspaces/{id}/sync/runs/{job_id}` | Status sync, progres, error aman; cek membership |
+| `GET` | `/api/v1/workspaces/{id}/snapshots/current` | Statistik snapshot aktif workspace yang diizinkan |
 
 Endpoint di atas adalah **rancangan**, bukan API yang sudah tersedia. Kontrak request/response final akan distandarkan ketika implementasi. `POST` di sini hanya memulai pekerjaan **pembacaan** Odoo dan menulis database lokal; tidak pernah melakukan `write` ke Odoo dalam tahap 1.
 
 ### 4A.2 Pembagian service
 
-- **`api`**: menjalankan Uvicorn/FastAPI, memvalidasi request, menyimpan status job, serta menyajikan data lokal. Tidak mengunduh seluruh BOM di thread request.
+- **`api`**: menjalankan Uvicorn/FastAPI, memvalidasi sesi login dan izin workspace untuk setiap request, menyimpan status job, serta menyajikan data lokal. Tidak mengunduh seluruh BOM di thread request.
 - **`worker`**: membaca antrean job SQLite, melakukan koneksi Odoo, mendownload per batch, membuat snapshot staging, validasi, dan publish. Untuk tahap awal gunakan tepat satu worker; jika terhenti, job `running` yang terlantar harus ditandai dan bisa diulang dengan aman.
-- **`bom_data` volume**: volume persisten yang di-mount ke kedua service, misalnya `/app/data`. File SQLite tetap ada setelah container dibangun ulang/dijalankan ulang.
+- **`bom_data` volume**: volume persisten yang di-mount ke kedua service, misalnya `/app/data`. SQLite beserta data BOM, user, membership, sesi dan audit tetap ada setelah container dibangun ulang/dijalankan ulang.
 - **Satu image Python** dibangun dari `Dockerfile` dan dipakai kedua service dengan perintah startup berbeda. Gunakan `docker-compose.yml` dan `.dockerignore`.
 
 SQLite perlu `PRAGMA foreign_keys=ON`, `busy_timeout`, dan konfigurasi WAL yang sesuai untuk dua proses pada **host dan filesystem lokal yang sama**. Jangan gunakan filesystem jaringan untuk volume SQLite. Hanya worker yang menulis data snapshot; FastAPI boleh menulis record job yang kecil. Untuk multi-server atau concurrency tinggi, evaluasi migrasi job queue dan storage ke PostgreSQL nanti.
@@ -208,6 +220,57 @@ SQLite perlu `PRAGMA foreign_keys=ON`, `busy_timeout`, dan konfigurasi WAL yang 
 - Logging ke stdout/stderr Docker, tanpa token dan tanpa dump isi data sensitif.
 - Healthcheck API dan prosedur start/stop serta backup volume didokumentasikan di README.
 - Commands target setelah implementasi: `docker compose up -d --build`, `docker compose logs -f api worker`, `docker compose down`. **`down -v` tidak boleh dipakai sembarangan** karena menghapus volume data.
+
+## 4B. Modul login, user dan otorisasi workspace (wajib sejak fondasi)
+
+### 4B.1 Prinsip
+
+- **User BOM Tools berbeda dari user Odoo.** User login ke aplikasi, sedangkan worker menggunakan kredensial integrasi Odoo yang hanya berada di sisi server.
+- User dapat login/logout, melihat profil, dan **mengubah password sendiri** dengan password lama.
+- Superadmin dapat **membuat, memperbarui, menonaktifkan/mengaktifkan user, serta reset password**. Reset mengharuskan user mengganti password pada login berikutnya.
+- Password disimpan sebagai **hash Argon2id**, tidak plaintext atau reversible. Tidak boleh ada password default hard-coded; superadmin awal dibuat satu kali melalui command bootstrap yang aman.
+- Login dilindungi throttling/rate limit. Sesi mempunyai expiry, dapat dicabut saat logout, reset password atau nonaktif user; audit log merekam aksi sensitif tanpa mencatat password atau token.
+- UI minimal login, profil/password, daftar workspace, dan pengelolaan user/membership diperlukan sejak fondasi. Tampilan khusus BOM dapat dikembangkan belakangan.
+
+### 4B.2 Model workspace dan RBAC
+
+**Workspace** adalah batas akses data, koneksi Odoo, dan operasional. Satu workspace bisa merepresentasikan perusahaan, tim, atau lingkungan Odoo; tidak dipaksakan satu workspace sama dengan satu company. Satu user dapat ditambahkan ke beberapa workspace dengan role berbeda. **User baru tidak memiliki akses workspace apa pun** sampai diberi membership eksplisit.
+
+| Role | Hak akses |
+|---|---|
+| **Superadmin** (global) | Kelola semua user, workspace, membership dan konfigurasi; setiap tindakan tercatat dalam audit |
+| **Workspace Admin** | Kelola anggota/role workspace sendiri, uji koneksi, jalankan sync dan baca BOM dalam workspace sendiri |
+| **Editor** | Baca/cari BOM dan menyiapkan perubahan lokal pada workspace sendiri (fitur perubahan menyusul) |
+| **Viewer** | Baca/cari BOM workspace yang diizinkan saja, **tidak** dapat menjalankan sync atau mengubah data |
+
+Izin aksi disiapkan secara granular: `bom.read`, `sync.run`, `change.prepare`, `change.approve`, `change.commit`. Pada fase awal hanya baca dan sync yang aktif; izin update Odoo **belum diberikan/diimplementasikan** dan tidak otomatis mengikuti role Editor.
+
+**Aturan wajib:** backend selalu memeriksa user, status aktif, membership, role dan `workspace_id` pada setiap request. Menyembunyikan pilihan workspace di UI **bukan** pengaman. ID workspace yang diganti manual di URL tetap harus ditolak (403) jika tidak memiliki izin. Pencarian BOM, query SQL, sync run, snapshot, serta metadata koneksi selalu dibatasi oleh workspace. Superadmin global tidak boleh dianggap sebagai pengganti pencatatan audit.
+
+### 4B.3 Penyimpanan, sesi, dan keamanan
+
+Tabel tambahan (dalam SQLite, bersama tabel BOM):
+
+| Tabel | Isi |
+|---|---|
+| `users` | ID, username/email unik, nama, status aktif, password hash, flag force-password-change |
+| `sessions` | Hash token sesi, user, expiry, revoked timestamp |
+| `workspaces` | ID, nama, konfigurasi instance/scope Odoo tanpa API key plaintext |
+| `workspace_memberships` | Unique `(workspace_id,user_id)`, role, status |
+| `audit_logs` | Actor, workspace, aksi, target, waktu, hasil |
+
+Gunakan sesi berbasis **HttpOnly cookie**, `SameSite=Lax`, `Secure` pada HTTPS, dan proteksi CSRF untuk request yang mengubah state. Untuk `http://localhost:700` saat development, flag Secure boleh dinonaktifkan khusus lokal. Jangan simpan token login di `localStorage`; sesi harus punya expiry dan dapat direvoke. Kredensial Odoo per workspace disimpan hanya di secret storage/configuration yang terlindungi di server/worker, tidak pernah dikirim ke browser.
+
+Semua record BOM dan pekerjaan sync harus memiliki ruang lingkup `workspace_id` yang jelas, termasuk data dari Odoo berbeda yang kebetulan memiliki `product_id` sama. Worker membaca `workspace_id` yang tersimpan pada job yang sudah diotorisasi, bukan mempercayai input bebas dari browser.
+
+### 4B.4 Acceptance criteria
+
+1. Login, logout, ganti password sendiri, CRUD user, reset password, dan pemilihan workspace dapat diuji.
+2. User tanpa membership tidak melihat BOM/snapshot atau menjalankan sync workspace tersebut, termasuk lewat URL yang dimanipulasi.
+3. Viewer tidak dapat memicu sync; Workspace Admin hanya dapat mengelola workspace sendiri.
+4. Menonaktifkan user atau mencabut membership segera memblokir akses berikutnya; sesi dirotasi/dicabut sesuai aksi.
+5. Restart Docker tidak menghilangkan user, membership, dan snapshot; semua tindakan sensitif masuk audit log.
+6. Token, password, dan API key tidak tampil dalam API, log, atau repository.
 
 ## 5. Strategi full synchronization
 
@@ -225,14 +288,14 @@ SQLite perlu `PRAGMA foreign_keys=ON`, `busy_timeout`, dan konfigurasi WAL yang 
 ### 5.2 Algoritma full sync
 
 1. **Preflight:** request FastAPI atau worker memvalidasi URL, API key, konektivitas, kemampuan model, company scope, dan field discovery. FastAPI mengantrekan job dan segera mengembalikan `job_id`; worker mengeksekusi langkah berikutnya.
-2. Buat `sync_run` dengan status `running`; buat snapshot SQLite staging yang terisolasi dari snapshot aktif.
+2. Periksa hak akses `sync.run`; buat `sync_run` dengan `workspace_id` yang diotorisasi dan status `running`; buat snapshot staging untuk workspace tersebut, terisolasi dari snapshot aktif.
 3. Tarik referensi yang diperlukan: company, UOM, produk dan template produk (lengkap dalam scope yang telah ditentukan).
 4. Tarik `mrp.bom` dengan cursor/paging sampai habis. Gunakan filter yang eksplisit dan `active_test: false` bila didukung.
 5. Tarik `mrp.bom.line` hingga habis dengan strategi yang sama. Untuk scope multi-company, terapkan aturan akses/relasi secara konsisten.
 6. Normalisasi nilai relasi Many2one (misalnya `[id, display_name]` atau `false`) menjadi ID numerik/null; simpan nilai mentah tambahan bila diperlukan untuk audit.
 7. Jalankan validasi (bagian 7): hitungan, ID unik, foreign key, dan kesesuaian cakupan.
 8. Lakukan pemeriksaan ulang hitungan/perubahan untuk mendeteksi drift akibat transaksi server selama sync; jika data bergerak, jalankan pass rekonsiliasi atau tandai snapshot tidak stabil. Ini mengurangi risiko tetapi **bukan jaminan konsistensi atomik**.
-9. Bila lulus, publikasikan staging sebagai **snapshot aktif** dalam transaksi lokal atomik; snapshot sebelumnya tetap tersedia untuk pemulihan.
+9. Bila lulus, publikasikan staging sebagai **snapshot aktif workspace tersebut** dalam transaksi lokal atomik; snapshot sebelumnya tetap tersedia untuk pemulihan.
 10. Catat waktu selesai, statistik, dan laporan hasil yang bisa dibaca operator.
 
 Jika gagal di salah satu langkah: snapshot aktif **tidak berubah** dan hasil run diberi status `failed` / `incomplete`. Resume merupakan optimasi; untuk implementasi pertama, *restart full sync* dengan staging baru lebih sederhana dan aman.
@@ -257,22 +320,22 @@ Tabel inti yang diusulkan:
 
 | Tabel | Isi |
 |---|---|
-| `sync_runs` | ID run, mulai/selesai, scope, jumlah, status, error |
-| `snapshots` | ID snapshot, sync_run, status staging/active/archived, waktu publish |
-| `bom_headers` | `snapshot_id` + `odoo_bom_id`, field BOM, payload tambahan |
-| `bom_lines` | `snapshot_id` + `odoo_bom_line_id`, `odoo_bom_id`, `component_product_id`, qty/UOM, metadata |
+| `sync_runs` | ID run, `workspace_id`, mulai/selesai, scope, jumlah, status, error |
+| `snapshots` | ID snapshot, `workspace_id`, sync_run, status staging/active/archived, waktu publish |
+| `bom_headers` | `workspace_id`, `snapshot_id` + `odoo_bom_id`, field BOM, payload tambahan |
+| `bom_lines` | `workspace_id`, `snapshot_id` + `odoo_bom_line_id`, `odoo_bom_id`, `component_product_id`, qty/UOM, metadata |
 | `products` | `snapshot_id` + `odoo_product_id`, SKU/nama/template, status |
 | `product_templates` | `snapshot_id` + `odoo_template_id` |
 | `uoms` | `snapshot_id` + `odoo_uom_id`, kategori dan konversi |
 | `companies` | `snapshot_id` + `odoo_company_id` |
-| `sync_issues` | Missing refs, permission, drift, mismatch, field unavailable |
+| `sync_issues` | `workspace_id`, missing refs, permission, drift, mismatch, field unavailable |
 
-Untuk tiap tabel data, simpan `raw_json` (payload API) **di samping kolom ter-normalisasi** agar informasi yang tidak dipetakan belum hilang. Record yang ada dalam snapshot berbeda harus bisa hidup berdampingan.
+Untuk tiap tabel data, simpan `raw_json` (payload API) **di samping kolom ter-normalisasi** agar informasi yang tidak dipetakan belum hilang. Record yang ada dalam snapshot berbeda harus bisa hidup berdampingan. **Setiap data BOM dan referensi relasinya harus terisolasi per workspace; referensi lintas workspace tidak diperbolehkan.**
 
 Indeks minimum:
 
-- `bom_lines(snapshot_id, component_product_id)` — pencarian global komponen X.
-- `bom_lines(snapshot_id, odoo_bom_id)` — rincian satu BOM.
+- `bom_lines(workspace_id, snapshot_id, component_product_id)` — pencarian global komponen X dalam workspace.
+- `bom_lines(workspace_id, snapshot_id, odoo_bom_id)` — rincian satu BOM.
 - `bom_headers(snapshot_id, product_tmpl_id)` dan/atau `product_id` — pencarian produk hasil.
 - `products(snapshot_id, default_code)` — pencarian berdasarkan SKU.
 - Unique `(snapshot_id, odoo_bom_id)` dan `(snapshot_id, odoo_bom_line_id)` untuk mencegah duplikasi per snapshot.
@@ -291,6 +354,7 @@ SELECT
     bl.product_qty
 FROM bom_lines bl
 WHERE bl.snapshot_id = :active_snapshot_id
+  AND bl.workspace_id = :authorized_workspace_id
   AND bl.component_product_id = :product_x
 ORDER BY bl.odoo_bom_id, bl.odoo_bom_line_id;
 ```
@@ -336,9 +400,13 @@ odoo-tools-/
 │       ├── main.py             # FastAPI entrypoint
 │       ├── api/
 │       │   ├── health.py       # health
+│       │   ├── auth.py         # login/logout/password
+│       │   ├── users.py        # manajemen user
+│       │   ├── workspaces.py   # membership + role
 │       │   ├── connection.py   # Odoo preflight
 │       │   ├── sync_runs.py    # antrean + status job
 │       │   └── snapshots.py    # ringkasan data lokal
+│       ├── security.py          # sesi, hash password, authorization
 │       ├── config.py
 │       ├── odoo_client.py       # JSON-2 API, auth, retry
 │       ├── discovery.py         # field / model discovery
@@ -348,6 +416,8 @@ odoo-tools-/
 │       └── validation.py        # completeness checks
 ├── tests/
 │   ├── test_api.py
+│   ├── test_auth.py
+│   ├── test_workspace_access.py
 │   ├── test_worker.py
 │   ├── test_pagination.py
 │   ├── test_mapping.py
@@ -366,16 +436,18 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 
 ## 10. Roadmap dan urutan delivery
 
-### Milestone M1 — FastAPI + Docker + koneksi/discovery
+### Milestone M1 — FastAPI + Docker + login/workspace + koneksi/discovery
 
 - Docker Compose menjalankan service `api` dan `worker` dengan volume SQLite persisten.
+- Bootstrap superadmin, login/logout, user CRUD, penggantian/reset password, role membership, dan UI minimal tersedia.
+- Pengujian isolasi workspace wajib lulus sebelum membuka endpoint data BOM.
 - FastAPI dapat menghubungi Odoo, membaca model/field yang tersedia, dan menguji hak akses.
-- Endpoint `/api/v1/health` dan `/api/v1/connection/test` dapat diuji tanpa mengubah data Odoo.
+- Endpoint `/api/v1/health` dan `/api/v1/workspaces/{id}/connection/test` dapat diuji tanpa mengubah data Odoo.
 - Hasil: laporan preflight; **tidak ada perubahan di Odoo**.
 
 ### Milestone M2 — Async sync job + full download + SQLite
 
-- `POST /api/v1/sync/runs` mengantrekan pekerjaan, worker memprosesnya, dan endpoint status melaporkan progres.
+- `POST /api/v1/workspaces/{id}/sync/runs` mengantrekan pekerjaan untuk workspace berizin, worker memprosesnya, dan endpoint status melaporkan progres.
 - Download seluruh header BOM, BOM lines, produk/template, UOM, dan referensi yang diperlukan.
 - Hasil: snapshot staging SQLite yang dapat dihitung dan di-query.
 
@@ -417,6 +489,7 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 - **FastAPI bukan worker sinkronisasi**: unduhan penuh diproses service worker terpisah.
 - **Volume data Docker harus persisten** dan aman dari penghapusan tidak sengaja.
 - **Port publik lokal harus 700**, bukan port default FastAPI 8000.
+- **Tidak ada akses BOM atau sinkronisasi tanpa login dan izin workspace yang dicek di backend**.
 - **Tidak ada klaim “semua data” tanpa cakupan dan laporan validasi.**
 - **Satu kegagalan sinkronisasi tidak boleh merusak snapshot terakhir yang valid.**
 - **Write-back hanya setelah preview, validasi, persetujuan, dan conflict check.**
