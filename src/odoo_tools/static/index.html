@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/assets/styles.css">
   <script defer src="/assets/app.js"></script>
   <script defer src="/assets/connection.js"></script>
+  <script defer src="/assets/sync.js"></script>
 </head>
 <body>
   <main class="layout">
@@ -45,6 +46,28 @@
             <div class="connection-actions"><button type="submit" id="odoo-save">Simpan konfigurasi</button><button type="button" id="odoo-test" class="secondary">Test Connection</button></div>
           </form>
           <div class="connection-status" id="odoo-connection-status" role="status" aria-live="polite"></div>
+        </section>
+        <section id="sync-panel" class="panel" hidden>
+          <div class="header-row"><div><h2>Download All BOM</h2>
+            <p class="subtle">Ambil seluruh BOM yang dapat diakses Odoo ke snapshot SQLite lokal. Tidak mengubah data Odoo.</p></div>
+            <span class="pill">SYNC READ-ONLY</span>
+          </div>
+          <label for="sync-workspace">Workspace yang akan diunduh</label>
+          <select id="sync-workspace" class="select-field"></select>
+          <div class="connection-actions">
+            <button id="sync-start" type="button">Download All BOM</button>
+            <button id="sync-refresh" type="button" class="secondary">Refresh Status</button>
+          </div>
+          <div class="sync-summary" id="sync-summary" role="status" aria-live="polite">Belum ada sinkronisasi.</div>
+          <div class="sync-progress" id="sync-progress" hidden>
+            <div class="progress-track"><div id="sync-progress-bar" class="progress-bar"></div></div>
+            <div id="sync-progress-label" class="hint"></div>
+          </div>
+          <div id="sync-models" class="table-wrap"></div>
+          <h3>Snapshot lokal aktif</h3>
+          <div id="sync-snapshot" class="subtle">Belum ada snapshot.</div>
+          <h3>Riwayat unduhan</h3>
+          <div id="sync-history" class="subtle">Belum ada pekerjaan.</div>
         </section>
         <section class="panel"><h2>Keamanan akun</h2><p class="subtle">Ubah password; seluruh sesi aktif akan berakhir.</p>
           <form id="password-form" class="three-fields"><input id="old-password" type="password" autocomplete="current-password" placeholder="Password saat ini" required><input id="new-password" type="password" autocomplete="new-password" placeholder="Password baru (min. 12)" minlength="12" required><button type="submit">Ganti password</button></form>
