@@ -96,23 +96,32 @@ def active_snapshot(db: sqlite3.Connection, workspace_id: int) -> int:
     return row["id"]
 
 
-def _decimal(value: object, where: str) -> Decimal:
+def _decimal(value: object, where: str, *, source: bool = False) -> Decimal:
+    """Read source qty faithfully; constrain only NEW user-entered quantities.
+
+    Odoo BOM Lines can legitimately contain zero, and Odoo float serialization
+    may have more than 12 fractional digits. Neither should block an export.
+    """
     if value is None or isinstance(value, bool):
         raise ValueError(f"{where}: qty is missing or invalid")
     try:
         result = Decimal(str(value).strip())
     except (InvalidOperation, ValueError):
         raise ValueError(f"{where}: qty must be numeric") from None
-    if not result.is_finite() or result <= 0 or result > Decimal("1000000000000"):
-        raise ValueError(f"{where}: qty must be positive and finite")
-    # A precision guard avoids silently inserting values with huge scales.
-    if result.as_tuple().exponent < -12:
-        raise ValueError(f"{where}: qty supports at most 12 decimal places")
+    if not result.is_finite() or abs(result) > Decimal("1000000000000"):
+        raise ValueError(f"{where}: qty must be finite and within supported range")
+    if not source:
+        if result < 0:
+            raise ValueError(f"{where}: new qty cannot be negative")
+        # Normalizing removes harmless trailing zeroes before precision check.
+        if result.normalize().as_tuple().exponent < -12:
+            raise ValueError(f"{where}: new qty supports at most 12 decimal places")
     return result
 
 
 def qty_text(number: object) -> str:
-    value = _decimal(number, "value")
+    # No rounding or validation as if source data were a proposed edit.
+    value = _decimal(number, "source value", source=True)
     return format(value.normalize(), "f")
 
 
@@ -170,7 +179,7 @@ def load_lines(db: sqlite3.Connection, workspace_id: int, snapshot_id: int) -> l
         try:
             quantity = qty_text(row["working_qty"] if row["working_qty"] is not None else raw.get("product_qty"))
         except ValueError as exc:
-            raise HTTPException(409, f"Invalid local quantity in BOM line {row['bom_line_id']}") from exc
+            raise HTTPException(409, f"Invalid local quantity in BOM line {row['bom_line_id']}: {exc}") from exc
         product = products[product_id]
         result.append({
             "workspace_id": workspace_id, "snapshot_id": snapshot_id,
@@ -247,8 +256,9 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict], cata
         values: list[object] = []
         for field in COLUMNS:
             value = line[field]
-            if field in ("original_qty", "new_qty"):
-                value = Decimal(value)
+            # Qty source values are inline strings on purpose: Excel numeric
+            # cells silently round values beyond 15 significant digits. Users
+            # may enter a number in the editable new_qty column; both parse.
             values.append(value)
         rows.append(values)
     notes = [
@@ -259,7 +269,7 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict], cata
         ["LANGKAH 1", "Edit hanya kolom F (new_component_product_id) dan H (new_qty) pada sheet BOM Lines."],
         ["LANGKAH 2", "Jangan mengubah/hapus/tambah baris atau ID. Urutan baris boleh diubah."],
         ["LANGKAH 3", "Upload Excel ke aplikasi, periksa preview, lalu tekan Apply to Local."],
-        ["CATATAN", "Qty > 0; Product ID harus tersedia pada snapshot yang sama."],
+        ["CATATAN", "Qty boleh 0. Qty baru tidak boleh negatif; Product ID wajib ada dalam snapshot."],
         ["KATALOG PRODUK", "Gunakan sheet Product Catalog untuk memilih Product ID pengganti."],
         ["KEAMANAN", "Snapshot Odoo asli tetap utuh; perubahan hanya di working BOM lokal."],
     ]
@@ -461,8 +471,8 @@ def validate_import(db: sqlite3.Connection, workspace_id: int, parsed: list[tupl
             line_id = _positive_id(values["bom_line_id"], label + " bom_line_id")
             old_product = _positive_id(values["original_component_product_id"], label + " old component")
             new_product = _positive_id(values["new_component_product_id"], label + " new component")
-            original_qty = _decimal(values["original_qty"], label + " original_qty")
-            new_qty = _decimal(values["new_qty"], label + " new_qty")
+            original_qty = _decimal(values["original_qty"], label + " original_qty", source=True)
+            new_qty = _decimal(values["new_qty"], label + " new_qty", source=True)
             uom_id = _positive_id(values["uom_id"], label + " uom_id")
             if (ws, snap) != (workspace_id, snapshot_id):
                 raise ValueError(f"{label}: workspace or snapshot differs from current")
@@ -482,6 +492,12 @@ def validate_import(db: sqlite3.Connection, workspace_id: int, parsed: list[tupl
                     raise ValueError(f"{label}: column {field} is read-only; edit only F and H")
             if new_product not in products:
                 raise ValueError(f"{label}: component Product ID {new_product} not in local snapshot")
+            # An unchanged Odoo qty, including zero or high-precision values,
+            # is always accepted. New values must meet local editing rules.
+            if new_qty != original_qty:
+                _decimal(new_qty, label + " new_qty")
+                if new_qty == 0:
+                    warnings.append(f"{label}: new component quantity is zero")
             if old_product == new_product and original_qty == new_qty:
                 continue
             product = products[new_product]
