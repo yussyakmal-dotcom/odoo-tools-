@@ -314,8 +314,26 @@ def _verify_relations(db: sqlite3.Connection, snapshot_id: int) -> None:
         "AND product.model='product.product' AND product.odoo_id=line.product_id)",
         (snapshot_id,),
     ).fetchone()[0]
-    if missing_boms or missing_components:
-        raise SyncFailure("broken_relations", f"missing_boms={missing_boms}, missing_products={missing_components}")
+    missing_templates = db.execute(
+        "SELECT COUNT(*) FROM sync_records bom WHERE bom.snapshot_id=? AND bom.model='mrp.bom' "
+        "AND bom.product_tmpl_id IS NOT NULL AND NOT EXISTS ("
+        "SELECT 1 FROM sync_records template WHERE template.snapshot_id=bom.snapshot_id "
+        "AND template.model='product.template' AND template.odoo_id=bom.product_tmpl_id)",
+        (snapshot_id,),
+    ).fetchone()[0]
+    missing_uoms = db.execute(
+        "SELECT COUNT(*) FROM sync_records line WHERE line.snapshot_id=? "
+        "AND line.model='mrp.bom.line' AND line.product_uom_id IS NOT NULL AND NOT EXISTS ("
+        "SELECT 1 FROM sync_records uom WHERE uom.snapshot_id=line.snapshot_id "
+        "AND uom.model='uom.uom' AND uom.odoo_id=line.product_uom_id)",
+        (snapshot_id,),
+    ).fetchone()[0]
+    if missing_boms or missing_components or missing_templates or missing_uoms:
+        raise SyncFailure(
+            "broken_relations",
+            f"missing_boms={missing_boms}, missing_products={missing_components}, "
+            f"missing_templates={missing_templates}, missing_uoms={missing_uoms}",
+        )
 
 
 async def execute_run(path: str, run_id: int, transport: httpx.AsyncBaseTransport | None = None) -> None:
@@ -351,12 +369,18 @@ async def execute_run(path: str, run_id: int, transport: httpx.AsyncBaseTranspor
                                           conn["base_url"], conn["database_name"], token, model)
                 except SyncFailure as exc:
                     # Optional models may not exist or may not be accessible in Odoo Online.
-                    if exc.code in ("permission", "not_found", "missing_required_fields"):
+                    with open_db(path) as db:
+                        progress = db.execute(
+                            "SELECT downloaded FROM sync_model_progress WHERE run_id=? AND model=?",
+                            (run_id, model),
+                        ).fetchone()
+                    # Only skip when the optional model cannot be accessed at discovery.
+                    # Failing after partial download is a real sync failure, never a skip.
+                    if exc.code in ("permission", "not_found", "missing_required_fields") and progress is None:
                         with transaction(path) as db:
                             db.execute(
                                 "INSERT INTO sync_model_progress(run_id,model,status,note) "
-                                "VALUES(?,?,'skipped',?) "
-                                "ON CONFLICT(run_id,model) DO UPDATE SET status='skipped',note=excluded.note",
+                                "VALUES(?,?,'skipped',?)",
                                 (run_id, model, exc.code),
                             )
                     else:
