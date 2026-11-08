@@ -1,6 +1,6 @@
 # ARCHITECTURE — Odoo 19 BOM Tools
 
-**Status:** Implementasi M1–M3 v0.8; spesifikasi Excel edit lokal (belum diimplementasikan)  
+**Status:** Implementasi M1–M5 v0.9; Excel edit hanya pada SQLite lokal  
 **Tanggal:** 2026-11-09  
 **Repository:** [yussyakmal-dotcom/odoo-tools-](https://github.com/yussyakmal-dotcom/odoo-tools-)  
 **Target:** Odoo 19 SaaS, paket Custom  
@@ -472,6 +472,19 @@ Satu baris = satu `bom_line_id`. Tidak boleh ada ID BOM Line palsu/duplikat atau
 - **Tidak ada request Odoo create/write/unlink selama download/upload/preview/Apply to Local.**
 - Mekanisme update kembali ke Odoo ditunda sampai keputusan desain baru dari user.
 
+### Status implementasi saat ini
+
+Modul ini **sudah dikodekan** dalam `excel_local.py`, `excel_api.py`, dan `static/excel.js`. Export XLSX ditulis menggunakan Office Open XML standar, tanpa menjalankan formula. Upload menggunakan pembaca XML yang membatasi ukuran arsip dan menolak formula pada sheet BOM Lines. API membutuhkan login dan otorisasi workspace, serta token CSRF pada upload/apply.
+
+| Endpoint | Fungsi |
+|---|---|
+| GET `/api/v1/workspaces/{wid}/excel/export` | Unduh Excel snapshot/working lokal |
+| POST `/api/v1/workspaces/{wid}/excel/preview` | Upload XLSX, validasi dan preview perubahan |
+| POST `/api/v1/workspaces/{wid}/excel/preview/{token}/apply` | Terapkan diff ke working overlay SQLite, atomik |
+| GET `/api/v1/workspaces/{wid}/excel/working-summary` | Statistik dan riwayat perubahan lokal |
+
+**Tiap ekspor memakai nilai efektif dari working overlay** jika baris sebelumnya telah diedit; "original" pada Excel berarti nilai saat ekspor, bukan mengubah snapshot mentah. Setelah Apply, file ekspor lama yang memakai nilai sumber sebelumnya ditolak. **Ingat:** belum ada tampilan BOM Explorer/Where Used untuk melihat working version selain Excel dan ringkasan saat ini.
+
 ## 9. Struktur repository yang direncanakan
 
 ```text
@@ -539,16 +552,21 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 - Validasi integrity/completeness, publish snapshot aktif, dan laporan.
 - Hasil: **Tahap 1 selesai**. Ringkasan snapshot dapat dibaca melalui FastAPI dan query lokal sudah dapat digunakan.
 
-### Milestone M4 — Cari BOM + Download Excel
+### Milestone M4 — Download Excel BOM (kode telah dibuat)
 
-- Pencarian dan Where Used lokal, lalu ekspor BOM Lines ke Excel termasuk kolom editable komponen dan qty.
+- Excel berisi sheet `BOM Lines`, `Instructions`, serta `Product Catalog`.
+- Seluruh BOM Lines dari snapshot aktif workspace diekspor beserta dua kolom edit (`new_component_product_id`, `new_qty`).
+- Pencarian/Where Used lokal sebagai antarmuka terpisah **belum dibuat**.
 - Tidak ada penulisan ke Odoo.
 
-### Milestone M5 — Upload Excel + Update Working BOM Lokal
+### Milestone M5 — Upload Excel + Update Working BOM Lokal (kode telah dibuat)
 
-- Upload Excel, validasi ID/produk/qty/UOM, preview diff, lalu Apply to Local.
-- Komponen dan qty dapat diubah masing-masing atau bersama, dengan snapshot asli tetap immutable.
-- Seluruh perubahan dan versinya disimpan di SQLite lokal per workspace.
+- Upload file XLSX, validasi seluruh identitas baris/produk/qty/UOM, preview diff dan peringatan, lalu Apply to Local.
+- Komponen dan qty dapat berubah independen atau bersama. Snapshot asli di `sync_records` tetap immutable.
+- Overlay disimpan di `local_bom_working` per workspace/snapshot/line. Riwayat perubahan di `local_excel_apply_batches` dan `local_excel_change_rows`.
+- Preview sementara memakai `local_excel_previews` (kedaluwarsa setelah 60 menit); Apply atomik dan menolak perubahan data sejak ekspor.
+- Tampilan dashboard `Excel Export–Import BOM Lokal` berisi ekspor, upload, preview, apply, dan ringkasan working edits.
+- **Mekanisme update Odoo tetap tidak dibahas.**
 
 ### Milestone M6 — Update ke Odoo (belum didiskusikan)
 
