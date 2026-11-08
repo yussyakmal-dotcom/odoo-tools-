@@ -1,6 +1,6 @@
 # ARCHITECTURE — Odoo 19 BOM Tools
 
-**Status:** Draft v0.4  
+**Status:** Draft v0.5  
 **Tanggal:** 2026-11-09  
 **Repository:** [yussyakmal-dotcom/odoo-tools-](https://github.com/yussyakmal-dotcom/odoo-tools-)  
 **Target:** Odoo 19 SaaS, paket Custom  
@@ -28,7 +28,7 @@ Alur utama:
 | Bahasa | Python 3.11+ |
 | Backend API | **FastAPI** (REST API internal; dokumentasi OpenAPI) |
 | Autentikasi | Akun lokal aplikasi, sesi login aman, password hash Argon2id |
-| Otorisasi | Workspace-scoped RBAC; default deny; validasi selalu di backend |
+| Otorisasi | **Administrator = superuser global selama development**; role lainnya tetap workspace-scoped RBAC, default deny |
 | Workspace | Scope terpisah untuk koneksi Odoo, snapshot, pekerjaan sync, dan akses anggota |
 | Deployment | **Docker + Docker Compose**, terdiri atas service API dan worker sinkronisasi |
 | Database lokal | SQLite dalam Docker persistent volume (versi pertama) |
@@ -191,7 +191,7 @@ Sebelum menyatakan snapshot lengkap, simpan:
 | `POST` | `/api/v1/auth/logout` | Logout dan cabut sesi |
 | `GET` | `/api/v1/auth/me` | Profil user dan daftar workspace yang diizinkan |
 | `POST` | `/api/v1/auth/change-password` | User mengganti password dengan password lama |
-| `GET/POST/PATCH` | `/api/v1/admin/users` dan `/api/v1/admin/users/{id}` | Superadmin mengelola user |
+| `GET/POST/PATCH` | `/api/v1/admin/users` dan `/api/v1/admin/users/{id}` | Administrator mengelola user |
 | `POST` | `/api/v1/admin/users/{id}/reset-password` | Reset password dan wajib ganti pada login berikutnya |
 | `GET/POST/PATCH` | `/api/v1/workspaces` dan `/api/v1/workspaces/{id}` | Akses dan pengelolaan workspace sesuai izin |
 | `GET/PUT/DELETE` | `/api/v1/workspaces/{id}/memberships` | Mengelola user/role per workspace |
@@ -227,8 +227,8 @@ SQLite perlu `PRAGMA foreign_keys=ON`, `busy_timeout`, dan konfigurasi WAL yang 
 
 - **User BOM Tools berbeda dari user Odoo.** User login ke aplikasi, sedangkan worker menggunakan kredensial integrasi Odoo yang hanya berada di sisi server.
 - User dapat login/logout, melihat profil, dan **mengubah password sendiri** dengan password lama.
-- Superadmin dapat **membuat, memperbarui, menonaktifkan/mengaktifkan user, serta reset password**. Reset mengharuskan user mengganti password pada login berikutnya.
-- Password disimpan sebagai **hash Argon2id**, tidak plaintext atau reversible. Tidak boleh ada password default hard-coded; superadmin awal dibuat satu kali melalui command bootstrap yang aman.
+- Administrator (superuser aplikasi selama development) dapat **membuat, memperbarui, menonaktifkan/mengaktifkan user, serta reset password**. Reset mengharuskan user mengganti password pada login berikutnya.
+- Password disimpan sebagai **hash Argon2id**, tidak plaintext atau reversible. Tidak boleh ada password default hard-coded; Administrator awal dibuat satu kali melalui command bootstrap yang aman.
 - Login dilindungi throttling/rate limit. Sesi mempunyai expiry, dapat dicabut saat logout, reset password atau nonaktif user; audit log merekam aksi sensitif tanpa mencatat password atau token.
 - UI minimal login, profil/password, daftar workspace, dan pengelolaan user/membership diperlukan sejak fondasi. Tampilan khusus BOM dapat dikembangkan belakangan.
 
@@ -238,14 +238,24 @@ SQLite perlu `PRAGMA foreign_keys=ON`, `busy_timeout`, dan konfigurasi WAL yang 
 
 | Role | Hak akses |
 |---|---|
-| **Superadmin** (global) | Kelola semua user, workspace, membership dan konfigurasi; setiap tindakan tercatat dalam audit |
+| **Administrator** (superuser global selama development) | **Semua izin dan semua fitur yang telah tersedia di BOM Tools, di seluruh workspace tanpa perlu membership**, termasuk manajemen user, workspace, koneksi, sync, analisis dan (setelah fitur tersedia) persiapan/persetujuan/commit perubahan. Seluruh aksi tetap diaudit. |
 | **Workspace Admin** | Kelola anggota/role workspace sendiri, uji koneksi, jalankan sync dan baca BOM dalam workspace sendiri |
 | **Editor** | Baca/cari BOM dan menyiapkan perubahan lokal pada workspace sendiri (fitur perubahan menyusul) |
 | **Viewer** | Baca/cari BOM workspace yang diizinkan saja, **tidak** dapat menjalankan sync atau mengubah data |
 
-Izin aksi disiapkan secara granular: `bom.read`, `sync.run`, `change.prepare`, `change.approve`, `change.commit`. Pada fase awal hanya baca dan sync yang aktif; izin update Odoo **belum diberikan/diimplementasikan** dan tidak otomatis mengikuti role Editor.
+Izin aksi disiapkan secara granular: `bom.read`, `sync.run`, `change.prepare`, `change.approve`, `change.commit`. **Dalam fase development, role Administrator diberi semua izin yang sudah tersedia sekarang maupun yang ditambahkan nanti**, tidak dibatasi membership workspace. Pada fase awal hanya baca dan sync yang diimplementasikan; update Odoo **belum tersedia untuk siapa pun** hingga modul write-back selesai. Role Editor tidak otomatis menerima izin commit.
 
-**Aturan wajib:** backend selalu memeriksa user, status aktif, membership, role dan `workspace_id` pada setiap request. Menyembunyikan pilihan workspace di UI **bukan** pengaman. ID workspace yang diganti manual di URL tetap harus ditolak (403) jika tidak memiliki izin. Pencarian BOM, query SQL, sync run, snapshot, serta metadata koneksi selalu dibatasi oleh workspace. Superadmin global tidak boleh dianggap sebagai pengganti pencatatan audit.
+**Aturan wajib:** backend selalu memeriksa sesi user dan status aktif pada setiap request. **Administrator melewati pembatasan RBAC/membership workspace** pada tahap development dan dapat memilih serta mengelola workspace mana pun, tetapi seluruh operasi data tetap menjalankan query dalam konteks `workspace_id` yang dipilih agar data antarruang kerja tidak tercampur. User selain Administrator wajib lolos pemeriksaan membership dan role. Menyembunyikan pilihan workspace di UI **bukan** pengaman; ID workspace yang diganti manual di URL harus ditolak (403) jika user non-admin tidak mempunyai izin. Semua tindakan Administrator tetap dicatat dalam audit log.
+
+**Batas superuser:** hak istimewa ini hanya berlaku pada **BOM Tools**, bukan bypass ACL/record rule Odoo atau menggantikan API key Odoo. Validasi input, perlindungan rahasia, integritas snapshot, pemeriksaan konflik, dan konfirmasi tindakan berisiko tetap berlaku bahkan bagi Administrator. Hak write-back tetap tidak ada hingga fiturnya dikembangkan dan diaktifkan secara eksplisit.
+
+### 4B.2a Kebijakan khusus fase development
+
+- **Administrator adalah superuser tunggal secara peran**: semua akun yang diberi role Administrator mendapat akses global ke seluruh workspace dan seluruh kemampuan yang benar-benar sudah diimplementasikan.
+- Jangan mengunci daftar izin Administrator satu per satu pada setiap endpoint; gunakan dependency terpusat di FastAPI untuk pemeriksaan `is_administrator` sebelum RBAC biasa, agar fitur baru otomatis tersedia untuk Administrator.
+- Tetap wajib login dan seluruh aktivitas penting diberi jejak audit. Jangan memberikan role Administrator otomatis ke user baru.
+- **Penyempurnaan pembatasan Administrator ditunda sampai fase pengembangan selesai.** Nantinya model izin dapat diubah menjadi lebih granular tanpa mengubah struktur workspace, user, atau data BOM.
+- Development tidak boleh dianggap alasan untuk membuka server tanpa autentikasi ke jaringan publik; port tetap `127.0.0.1:700` pada host pengembangan.
 
 ### 4B.3 Penyimpanan, sesi, dan keamanan
 
@@ -266,11 +276,12 @@ Semua record BOM dan pekerjaan sync harus memiliki ruang lingkup `workspace_id` 
 ### 4B.4 Acceptance criteria
 
 1. Login, logout, ganti password sendiri, CRUD user, reset password, dan pemilihan workspace dapat diuji.
-2. User tanpa membership tidak melihat BOM/snapshot atau menjalankan sync workspace tersebut, termasuk lewat URL yang dimanipulasi.
-3. Viewer tidak dapat memicu sync; Workspace Admin hanya dapat mengelola workspace sendiri.
-4. Menonaktifkan user atau mencabut membership segera memblokir akses berikutnya; sesi dirotasi/dicabut sesuai aksi.
-5. Restart Docker tidak menghilangkan user, membership, dan snapshot; semua tindakan sensitif masuk audit log.
-6. Token, password, dan API key tidak tampil dalam API, log, atau repository.
+2. Administrator dapat mengakses **seluruh workspace dan semua fitur yang telah diimplementasikan** tanpa membership, termasuk manajemen user dan pengaturan role; aksinya ter-audit.
+3. User non-admin tanpa membership tidak melihat BOM/snapshot atau menjalankan sync workspace tersebut, termasuk lewat URL yang dimanipulasi.
+4. Viewer tidak dapat memicu sync; Workspace Admin hanya dapat mengelola workspace sendiri.
+5. Menonaktifkan user atau mencabut membership segera memblokir akses berikutnya; sesi dirotasi/dicabut sesuai aksi.
+6. Restart Docker tidak menghilangkan user, membership, dan snapshot; semua tindakan sensitif masuk audit log.
+7. Token, password, dan API key tidak tampil dalam API, log, atau repository.
 
 ## 5. Strategi full synchronization
 
@@ -439,8 +450,8 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 ### Milestone M1 — FastAPI + Docker + login/workspace + koneksi/discovery
 
 - Docker Compose menjalankan service `api` dan `worker` dengan volume SQLite persisten.
-- Bootstrap superadmin, login/logout, user CRUD, penggantian/reset password, role membership, dan UI minimal tersedia.
-- Pengujian isolasi workspace wajib lulus sebelum membuka endpoint data BOM.
+- Bootstrap Administrator superuser, login/logout, user CRUD, penggantian/reset password, role membership, dan UI minimal tersedia.
+- Pengujian akses global Administrator dan isolasi workspace bagi non-admin wajib lulus sebelum membuka endpoint data BOM.
 - FastAPI dapat menghubungi Odoo, membaca model/field yang tersedia, dan menguji hak akses.
 - Endpoint `/api/v1/health` dan `/api/v1/workspaces/{id}/connection/test` dapat diuji tanpa mengubah data Odoo.
 - Hasil: laporan preflight; **tidak ada perubahan di Odoo**.
@@ -489,7 +500,7 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 - **FastAPI bukan worker sinkronisasi**: unduhan penuh diproses service worker terpisah.
 - **Volume data Docker harus persisten** dan aman dari penghapusan tidak sengaja.
 - **Port publik lokal harus 700**, bukan port default FastAPI 8000.
-- **Tidak ada akses BOM atau sinkronisasi tanpa login dan izin workspace yang dicek di backend**.
+- **Tidak ada akses BOM atau sinkronisasi tanpa login**; Administrator (superuser) memiliki akses global selama development, sedangkan user lain memerlukan izin workspace yang dicek di backend.
 - **Tidak ada klaim “semua data” tanpa cakupan dan laporan validasi.**
 - **Satu kegagalan sinkronisasi tidak boleh merusak snapshot terakhir yang valid.**
 - **Write-back hanya setelah preview, validasi, persetujuan, dan conflict check.**
