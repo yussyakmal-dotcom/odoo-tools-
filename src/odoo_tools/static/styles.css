@@ -7,3 +7,7 @@
 .connection-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
 .connection-status{white-space:pre-wrap;font-size:13px;color:#43566a;line-height:1.65;margin-top:18px;border-top:1px solid #e8edf1;padding-top:15px}
 .connection-status:empty{display:none}
+
+.key-status{font-size:12px;font-weight:650;margin:2px 0 5px;padding:9px 12px;border-radius:8px;line-height:1.5}
+.key-status.saved{background:#e5f4e9;color:#276b45}
+.key-status.missing{background:#fff4e5;color:#946017}
