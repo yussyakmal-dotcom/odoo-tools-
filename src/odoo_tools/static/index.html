@@ -41,6 +41,7 @@
             <label for="odoo-database">Nama database (opsional)</label>
             <input id="odoo-database" type="text" maxlength="128" placeholder="kosongkan jika tidak diperlukan" autocomplete="off">
             <label for="odoo-key">Odoo API Key</label>
+            <div id="odoo-key-status" class="key-status" role="status" aria-live="polite">Memeriksa status penyimpanan...</div>
             <input id="odoo-key" type="password" placeholder="Masukkan API Key baru" autocomplete="new-password" spellcheck="false">
             <p class="hint" id="odoo-key-hint">API Key disimpan terenkripsi. Setelah disimpan, nilainya tidak dapat dilihat kembali.</p>
             <div class="connection-actions"><button type="submit" id="odoo-save">Simpan konfigurasi</button><button type="button" id="odoo-test" class="secondary">Test Connection</button></div>
