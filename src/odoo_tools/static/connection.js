@@ -1,6 +1,17 @@
 /* Workspace Odoo connection UI: no API key value is ever returned from the backend. */
 let selectedConnectionWorkspace = null;
 
+// Store ONLY the selected workspace ID. Never store an Odoo API key or a login token.
+const CONNECTION_WORKSPACE_KEY = 'bom-tools-connection-workspace';
+function rememberedConnectionWorkspace() {
+  try { return window.localStorage.getItem(CONNECTION_WORKSPACE_KEY); }
+  catch { return null; }
+}
+function rememberConnectionWorkspace(id) {
+  try { window.localStorage.setItem(CONNECTION_WORKSPACE_KEY, String(id)); }
+  catch { /* Storage may be disabled; connection data still lives on the server. */ }
+}
+
 function connectionStatus(message) {
   $('odoo-connection-status').textContent = message;
 }
@@ -15,9 +26,13 @@ async function refreshConnectionPanel(workspaces) {
     return;
   }
   const dropdown = $('connection-workspace');
-  if (!authorized.some(w => String(w.id) === String(selectedConnectionWorkspace))) {
+  const preferred = selectedConnectionWorkspace || rememberedConnectionWorkspace();
+  if (authorized.some(w => String(w.id) === String(preferred))) {
+    selectedConnectionWorkspace = String(preferred);
+  } else {
     selectedConnectionWorkspace = String(authorized[0].id);
   }
+  rememberConnectionWorkspace(selectedConnectionWorkspace);
   dropdown.replaceChildren();
   for (const w of authorized) {
     const option = document.createElement('option');
@@ -39,6 +54,10 @@ async function loadOdooConnection() {
     $('odoo-url').value = c.base_url || '';
     $('odoo-database').value = c.database || '';
     $('odoo-key').required = !c.api_key_configured;
+    $('odoo-key-status').textContent = c.api_key_configured
+      ? '✓ API Key tersimpan di server (disembunyikan untuk keamanan)'
+      : '⚠ API Key belum tersimpan untuk workspace ini';
+    $('odoo-key-status').className = c.api_key_configured ? 'key-status saved' : 'key-status missing';
     $('odoo-key').placeholder = c.api_key_configured ? 'Kosongkan untuk memakai API Key tersimpan' : 'Masukkan API Key Odoo';
     $('odoo-key-hint').textContent = c.api_key_configured
       ? 'API Key telah disimpan terenkripsi. Untuk menggantinya, masukkan API Key baru; nilai lama tidak ditampilkan.'
@@ -46,14 +65,17 @@ async function loadOdooConnection() {
     connectionStatus(c.configured
       ? 'Konfigurasi tersimpan. Status pengujian terakhir: ' + (c.last_test_status || 'belum diuji') +
         (c.last_tested_at ? '\nDiuji pada: ' + c.last_tested_at : '')
-      : 'Belum ada konfigurasi Odoo pada workspace ini.');
+      : 'Belum ada konfigurasi Odoo pada workspace ini. Pastikan workspace di atas benar.');
   } catch (error) {
+    $('odoo-key-status').textContent = 'Tidak dapat memastikan status API Key';
+    $('odoo-key-status').className = 'key-status missing';
     connectionStatus('Tidak dapat membaca konfigurasi: ' + error.message);
   }
 }
 
 $('connection-workspace').addEventListener('change', async () => {
   selectedConnectionWorkspace = $('connection-workspace').value;
+  rememberConnectionWorkspace(selectedConnectionWorkspace);
   await loadOdooConnection();
 });
 
