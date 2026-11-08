@@ -171,7 +171,7 @@ Sebelum menyatakan snapshot lengkap, simpan:
 4. Tarik `mrp.bom` dengan cursor/paging sampai habis. Gunakan filter yang eksplisit dan `active_test: false` bila didukung.
 5. Tarik `mrp.bom.line` hingga habis dengan strategi yang sama. Untuk scope multi-company, terapkan aturan akses/relasi secara konsisten.
 6. Normalisasi nilai relasi Many2one (misalnya `[id, display_name]` atau `false`) menjadi ID numerik/null; simpan nilai mentah tambahan bila diperlukan untuk audit.
-7. Jalankan validasi (``6``): hitungan, ID unik, foreign key, dan kesesuaian cakupan.
+7. Jalankan validasi (bagian 7): hitungan, ID unik, foreign key, dan kesesuaian cakupan.
 8. Lakukan pemeriksaan ulang hitungan/perubahan untuk mendeteksi drift akibat transaksi server selama sync; jika data bergerak, jalankan pass rekonsiliasi atau tandai snapshot tidak stabil. Ini mengurangi risiko tetapi **bukan jaminan konsistensi atomik**.
 9. Bila lulus, publikasikan staging sebagai **snapshot aktif** dalam transaksi lokal atomik; snapshot sebelumnya tetap tersedia untuk pemulihan.
 10. Catat waktu selesai, statistik, dan laporan hasil yang bisa dibaca operator.
@@ -351,4 +351,4 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 
 - Odoo 19, *External JSON-2 API*: https://www.odoo.com/documentation/19.0/developer/reference/external_api.html
 
-**Status pekerjaan:** Dokumen arsitektur disepakati sebagai baseline rancangan. Implementasi tahap 1 dan pengujian koneksi Odoo belum dilakukan.
+**Status pekerjaan:** Dokumen arsitektur dibuat sebagai draft awal untuk ditinjau. Implementasi tahap 1 dan pengujian koneksi Odoo belum dilakukan.
