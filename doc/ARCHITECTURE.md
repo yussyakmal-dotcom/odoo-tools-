@@ -1,6 +1,6 @@
 # ARCHITECTURE — Odoo 19 BOM Tools
 
-**Status:** Draft v0.5  
+**Status:** Draft v0.6  
 **Tanggal:** 2026-11-09  
 **Repository:** [yussyakmal-dotcom/odoo-tools-](https://github.com/yussyakmal-dotcom/odoo-tools-)  
 **Target:** Odoo 19 SaaS, paket Custom  
@@ -283,6 +283,24 @@ Semua record BOM dan pekerjaan sync harus memiliki ruang lingkup `workspace_id` 
 6. Restart Docker tidak menghilangkan user, membership, dan snapshot; semua tindakan sensitif masuk audit log.
 7. Token, password, dan API key tidak tampil dalam API, log, atau repository.
 
+## 4C. Implementasi koneksi Odoo per workspace (milestone koneksi)
+
+**Sudah diimplementasikan** di `src/odoo_tools/odoo_connection.py` dengan endpoint:
+
+| Method | Path | Izin | Fungsi |
+|---|---|---|---|
+| GET | `/api/v1/workspaces/{wid}/odoo/connection` | Administrator / Workspace Admin | Tampilkan konfigurasi tanpa secret |
+| PUT | `/api/v1/workspaces/{wid}/odoo/connection` | Administrator / Workspace Admin, CSRF | Simpan URL, database opsional, API Key baru/pertahankan |
+| POST | `/api/v1/workspaces/{wid}/odoo/connection/test` | Administrator / Workspace Admin, CSRF | Uji konteks Odoo dan baca sampel lima model |
+
+- API Key disimpan di tabel `workspace_odoo_connections.encrypted_api_key` menggunakan **Fernet**. Master key `BOM_ENCRYPTION_KEY` harus dipasang di environment Docker, tidak disimpan di database/repo. Hilangnya master key berarti API Key yang tersimpan tidak dapat didekripsi; lindungi/backup secret dan lakukan rotasi dengan prosedur aman.
+- Penanganan secret hanya di server: Pydantic `SecretStr`, tidak pernah ada `GET` endpoint yang mengungkap secret, tidak ikut log/audit.
+- Hanya hostname HTTPS `*.odoo.com` atau hostname custom yang tercantum secara eksplisit di `BOM_ODOO_ALLOWED_HOSTS` yang boleh dipakai. Tolak URL dengan path, userinfo, port nonstandar, HTTP atau IP langsung; redirect HTTP tidak diikuti. Host allowlist membatasi risiko SSRF.
+- Test Connection memakai JSON-2 `POST /json/2/res.users/context_get`, kemudian `search_read` dengan `limit=1`, `fields=["id"]`, dan domain kosong untuk `mrp.bom`, `mrp.bom.line`, `product.product`, `product.template`, `uom.uom`. Tidak ada metode create/write/unlink.
+- Hasil test dikategorikan `connected`, `partial`, `failed`, dengan status masing-masing model. Error sensitif/traceback dari Odoo tidak diteruskan ke browser.
+- Halaman pengaturan tersedia pada dashboard workspace. **Tidak ada pengunduhan semua BOM pada milestone ini**; worker full sync dibangun selanjutnya.
+- Implementasi autentikasi dan otorisasi backend tetap menggunakan RBAC workspace. Administrator mendapatkan akses ke seluruh workspace dalam fase development seperti disepakati sebelumnya.
+
 ## 5. Strategi full synchronization
 
 ### 5.1 Prinsip
@@ -488,7 +506,7 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 2. Apakah BOM perlu diambil untuk satu company atau seluruh company yang diizinkan?
 3. Hak akses bot integrasi dan visibilitas BOM arsip.
 4. Field BOM/line tambahan apa yang tersedia di database aktual, termasuk varian, operasi, dan by-product?
-5. Lokasi Docker host (laptop/server), backup Docker volume, dan kebutuhan pengamanan SQLite.
+5. Lokasi Docker host (laptop/server), backup Docker volume serta `BOM_ENCRYPTION_KEY`, dan kebutuhan pengamanan SQLite.
 6. Ukuran data riil untuk menentukan batch size, timeout, serta performa SQLite.
 
 ## 12. Prinsip implementasi yang tidak boleh dilanggar
@@ -501,6 +519,7 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 - **Volume data Docker harus persisten** dan aman dari penghapusan tidak sengaja.
 - **Port publik lokal harus 700**, bukan port default FastAPI 8000.
 - **Tidak ada akses BOM atau sinkronisasi tanpa login**; Administrator (superuser) memiliki akses global selama development, sedangkan user lain memerlukan izin workspace yang dicek di backend.
+- **API Key Odoo harus dienkripsi at rest** memakai secret server terpisah, tanpa endpoint baca kunci.
 - **Tidak ada klaim “semua data” tanpa cakupan dan laporan validasi.**
 - **Satu kegagalan sinkronisasi tidak boleh merusak snapshot terakhir yang valid.**
 - **Write-back hanya setelah preview, validasi, persetujuan, dan conflict check.**
