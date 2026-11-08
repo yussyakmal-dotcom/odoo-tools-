@@ -5,6 +5,8 @@ services:
       - "127.0.0.1:700:8080"
     environment:
       BOM_DB_PATH: /app/data/bom_tools.sqlite3
+      BOM_ENCRYPTION_KEY: ${BOM_ENCRYPTION_KEY:-}
+      BOM_ODOO_ALLOWED_HOSTS: ${BOM_ODOO_ALLOWED_HOSTS:-}
       BOM_COOKIE_SECURE: ${BOM_COOKIE_SECURE:-false}
       BOM_SESSION_TTL_HOURS: ${BOM_SESSION_TTL_HOURS:-8}
     volumes:
@@ -22,6 +24,8 @@ services:
     command: ["python", "-m", "odoo_tools.worker"]
     environment:
       BOM_DB_PATH: /app/data/bom_tools.sqlite3
+      BOM_ENCRYPTION_KEY: ${BOM_ENCRYPTION_KEY:-}
+      BOM_ODOO_ALLOWED_HOSTS: ${BOM_ODOO_ALLOWED_HOSTS:-}
     volumes:
       - bom_data:/app/data
     restart: unless-stopped
