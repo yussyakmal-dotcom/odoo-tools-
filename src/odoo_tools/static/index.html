@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Odoo BOM Tools</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script defer src="/assets/app.js"></script>
+</head>
+<body>
+  <main class="layout">
+    <header class="topbar"><div class="logo">B</div><div><strong>ODOO 19 BOM TOOLS</strong><small>Local workspace management · Development foundation</small></div><span class="build">v0.1</span></header>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <section id="login-view" class="panel login-panel" hidden>
+      <div class="eyebrow">SECURE ACCESS</div>
+      <h1>Masuk ke BOM Tools</h1>
+      <p>Gunakan akun Administrator yang dibuat melalui terminal Docker.</p>
+      <form id="login-form">
+        <label for="username">Username</label><input id="username" autocomplete="username" required placeholder="administrator">
+        <label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
+        <button type="submit">Masuk</button>
+      </form>
+      <p class="hint">Belum ada akun? Jalankan <code>docker compose exec -it api python -m odoo_tools.cli create-admin</code> di terminal.</p>
+    </section>
+    <section id="app-view" hidden>
+      <div class="welcome"><div><div class="eyebrow">WORKSPACE CONSOLE</div><h1>Dashboard</h1><p id="identity"></p></div><button id="logout" class="secondary">Keluar</button></div>
+      <div class="stack">
+        <section class="panel"><h2>Workspace</h2><p class="subtle">Semua data BOM nantinya dipisahkan menurut workspace.</p><div id="workspaces" class="empty">Belum ada workspace.</div>
+          <form id="workspace-form" class="inline-form" hidden><input id="workspace-name" placeholder="Nama workspace" required maxlength="100"><input id="workspace-slug" placeholder="Slug (contoh: produksi)" required pattern="[a-z0-9_-]{3,64}"><button type="submit">Buat workspace</button></form>
+        </section>
+        <section class="panel"><h2>Keamanan akun</h2><p class="subtle">Ubah password; seluruh sesi aktif akan berakhir.</p>
+          <form id="password-form" class="three-fields"><input id="old-password" type="password" autocomplete="current-password" placeholder="Password saat ini" required><input id="new-password" type="password" autocomplete="new-password" placeholder="Password baru (min. 12)" minlength="12" required><button type="submit">Ganti password</button></form>
+        </section>
+        <section id="admin-area" class="panel" hidden><div class="header-row"><div><h2>Manajemen pengguna</h2><p class="subtle">Administrator mendapat akses penuh selama development.</p></div><span class="pill">Administrator</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Username</th><th>Nama</th><th>Role</th><th>Status</th></tr></thead><tbody id="users"></tbody></table></div>
+          <h3>Tambah user</h3><form id="user-form" class="three-fields"><input id="user-name" placeholder="Username" required><input id="user-display" placeholder="Nama tampilan" required><input id="user-password" type="password" placeholder="Password awal (min. 12)" minlength="12" required><label class="checkbox"><input id="user-admin" type="checkbox"> Administrator</label><button type="submit">Tambah user</button></form>
+          <p class="hint">Aktivasi/nonaktif, reset password, dan membership sudah tersedia melalui endpoint di <a href="/docs" target="_blank" rel="noopener">API Docs</a>.</p>
+        </section>
+        <section class="panel"><h2>Status integrasi Odoo</h2><p>Sinkronisasi BOM belum diaktifkan pada fondasi ini. Langkah berikutnya adalah koneksi JSON-2 dan worker download.</p><span class="pill muted">Belum terkoneksi</span></section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
