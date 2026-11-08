@@ -152,7 +152,7 @@ Port browser tetap `http://localhost:700/` pada host; Docker memetakan localhost
 
 - **Administrator**, **Workspace Admin** dan **Editor** dapat upload, preview, dan Apply to Local sesuai workspace; Viewer hanya dapat download Excel.
 - Jika file telah usang karena snapshot baru atau perubahan working BOM sejak ekspor, preview/Apply ditolak; lakukan export ulang.
-- Kolom identitas diverifikasi terhadap SQLite. Nilai komponen tujuan wajib ada di snapshot workspace yang sama. Qty harus lebih dari nol dan maksimal 12 angka desimal.
+- Kolom identitas diverifikasi terhadap SQLite. Nilai komponen tujuan wajib ada di snapshot workspace yang sama. **Qty asli Odoo, termasuk 0 dan desimal presisi tinggi, diekspor apa adanya sebagai teks agar Excel tidak membulatkannya.** Qty baru boleh 0 (ditandai peringatan), tidak boleh negatif, dan perubahan qty mendukung maksimal 12 angka desimal. Nilai qty asli yang tidak diubah tetap diterima walaupun memiliki lebih dari 12 desimal.
 - Perbedaan company, produk arsip, atau default UOM akan ditampilkan sebagai peringatan. Perbedaan kategori UOM yang diketahui **ditolak**, tidak ada konversi qty otomatis.
 - File Excel dibatasi 12 MB, maksimum 100.000 BOM Lines, formula pada sheet `BOM Lines` ditolak.
 - Preview berlaku 60 menit dan hanya dapat diterapkan sekali oleh user yang meng-uploadnya.
