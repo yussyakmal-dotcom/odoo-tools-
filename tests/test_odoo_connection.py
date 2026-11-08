@@ -164,3 +164,32 @@ def test_workspace_scope_restricted_for_nonmember(client):
         assert viewer.get(conn_path(wid)).status_code == 403
     finally:
         viewer.close()
+
+
+def test_odoo_settings_survive_app_restart_and_key_is_not_returned(client):
+    """Reinitializing FastAPI against the same SQLite volume must preserve settings."""
+    instance, csrf, wid, path = client
+    saved = put_connection(instance, csrf, wid)
+    assert saved.status_code == 200
+    with open_db(path) as db:
+        secret_before = db.execute(
+            "SELECT encrypted_api_key FROM workspace_odoo_connections WHERE workspace_id=?",
+            (wid,),
+        ).fetchone()[0]
+    with TestClient(create_app(Settings(db_path=path))) as restarted:
+        signed_in = restarted.post("/api/v1/auth/login", json={
+            "username": "administrator", "password": "InitialAdminPassword123!",
+        })
+        assert signed_in.status_code == 200
+        restored = restarted.get(conn_path(wid))
+        assert restored.status_code == 200
+        assert restored.json()["base_url"] == "https://demo.odoo.com"
+        assert restored.json()["database"] == "demo"
+        assert restored.json()["api_key_configured"] is True
+        assert "s3cret-odoo-api-key" not in restored.text
+    with open_db(path) as db:
+        secret_after = db.execute(
+            "SELECT encrypted_api_key FROM workspace_odoo_connections WHERE workspace_id=?",
+            (wid,),
+        ).fetchone()[0]
+        assert secret_after == secret_before
