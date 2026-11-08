@@ -1,6 +1,6 @@
 # ARCHITECTURE — Odoo 19 BOM Tools
 
-**Status:** Draft v0.1  
+**Status:** Draft v0.2  
 **Tanggal:** 2026-11-09  
 **Repository:** [yussyakmal-dotcom/odoo-tools-](https://github.com/yussyakmal-dotcom/odoo-tools-)  
 **Target:** Odoo 19 SaaS, paket Custom  
@@ -26,18 +26,40 @@ Alur utama:
 |---|---|
 | Pola integrasi | **Local-first, server-authoritative**: Odoo adalah sumber kebenaran; lokal adalah tempat analisis/perencanaan perubahan |
 | Bahasa | Python 3.11+ |
-| Database lokal | SQLite (versi pertama) |
+| Backend API | **FastAPI** (REST API internal; dokumentasi OpenAPI) |
+| Deployment | **Docker + Docker Compose**, terdiri atas service API dan worker sinkronisasi |
+| Database lokal | SQLite dalam Docker persistent volume (versi pertama) |
 | API Odoo | **External JSON-2 API** Odoo 19: `POST /json/2/<model>/<method>` |
 | Autentikasi | API key pada backend/CLI, tidak pada browser atau repository |
-| Antarmuka awal | CLI untuk *sync*, status, dan pemeriksaan data; GUI bukan prasyarat |
+| Antarmuka awal | Endpoint FastAPI untuk *preflight*, mulai sync, status, dan ringkasan snapshot; GUI bukan prasyarat |
 | Scope tahap 1 | **Read-only**: tidak memanggil `create`, `write`, atau `unlink` |
-| Pola sinkronisasi | Full snapshot ke database *staging*, divalidasi, lalu dipublikasikan sebagai snapshot aktif |
+| Pola sinkronisasi | FastAPI memasukkan sync job ke antrean lokal; worker terpisah membuat full snapshot *staging*, memvalidasi, lalu mempublikasikan snapshot aktif |
 | Data historis | Snapshot sinkronisasi dan calon perubahan dipisah; tidak menimpa data asli |
 | Update Odoo | **Belum diimplementasikan**; masuk tahap berikutnya dan dinonaktifkan secara default |
 
 ### Diagram alur
 
 ```text
++----------------------------+
+| Browser / API Client       |
++-------------+--------------+
+              |
+              | HTTP (localhost default)
+              v
++----------------------------+
+| FastAPI service (Docker)   |
+| enqueue job / status / API |
++-------------+--------------+
+              |
+              | SQLite job queue
+              v
++----------------------------+
+| Sync Worker (Docker)       |
+| fetch / staging / validate |
++-------------+--------------+
+              |
+              | HTTPS JSON-2 API
+              v
 +----------------------------+
 | Odoo 19 SaaS Custom        |
 | BOM / BOM Lines / Products |
@@ -88,6 +110,8 @@ Alur utama:
 
 ### 3.1 Tahap 1 — wajib ada
 
+- Service FastAPI berjalan di Docker dan memiliki endpoint health check, preflight, start sync, serta status sync.
+- Worker sinkronisasi berjalan sebagai service Docker terpisah dari FastAPI; tidak memproses full download di dalam HTTP request.
 - Koneksi terautentikasi ke database Odoo 19 SaaS Custom.
 - Deteksi kemampuan baca untuk model/field yang dibutuhkan.
 - Ambil **semua header BOM dan semua BOM line yang terlihat oleh akun integrasi** melalui paging.
@@ -103,7 +127,7 @@ Alur utama:
 
 - Penggantian X → Y, perubahan kuantitas, penghapusan/penambahan baris.
 - Write-back, rollback, pemulihan perubahan di Odoo.
-- UI web, login banyak pengguna, penjadwalan otomatis.
+- UI web, login banyak pengguna, penjadwalan otomatis (FastAPI minimal tetap termasuk tahap 1).
 - Costing, forecasting, MRP simulation, atau optimasi BOM.
 
 Hal-hal di atas dipertimbangkan dalam desain tetapi **tidak boleh menghambat pengiriman tahap 1**.
@@ -150,6 +174,40 @@ Sebelum menyatakan snapshot lengkap, simpan:
 - Jumlah record server dan hasil lokal per model.
 - Hasil validasi integritas; bila ada pengecualian, status *incomplete*.
 
+## 4A. FastAPI, job sync, dan Docker Compose
+
+**FastAPI adalah pintu masuk aplikasi; worker adalah pelaksana sinkronisasi jangka panjang.** HTTP request tidak menunggu sampai seluruh BOM selesai diunduh. Sistem menggunakan satu job aktif pada satu waktu untuk menghindari sync berbarengan ke SQLite/Odoo.
+
+### 4A.1 Endpoint awal (read-only terhadap Odoo)
+
+| Method | Endpoint | Hasil |
+|---|---|---|
+| `GET` | `/api/v1/health` | Status backend/container |
+| `POST` | `/api/v1/connection/test` | Pemeriksaan koneksi, model dan hak baca Odoo (tanpa mengembalikan token) |
+| `POST` | `/api/v1/sync/runs` | Buat sync job, balas `202 Accepted` dan `job_id`; tolak job aktif ganda |
+| `GET` | `/api/v1/sync/runs/{job_id}` | Status `queued/running/completed/failed/incomplete`, progres dan pesan error aman |
+| `GET` | `/api/v1/snapshots/current` | Statistik snapshot aktif lokal beserta waktu dan cakupan sync |
+
+Endpoint di atas adalah **rancangan**, bukan API yang sudah tersedia. Kontrak request/response final akan distandarkan ketika implementasi. `POST` di sini hanya memulai pekerjaan **pembacaan** Odoo dan menulis database lokal; tidak pernah melakukan `write` ke Odoo dalam tahap 1.
+
+### 4A.2 Pembagian service
+
+- **`api`**: menjalankan Uvicorn/FastAPI, memvalidasi request, menyimpan status job, serta menyajikan data lokal. Tidak mengunduh seluruh BOM di thread request.
+- **`worker`**: membaca antrean job SQLite, melakukan koneksi Odoo, mendownload per batch, membuat snapshot staging, validasi, dan publish. Untuk tahap awal gunakan tepat satu worker; jika terhenti, job `running` yang terlantar harus ditandai dan bisa diulang dengan aman.
+- **`bom_data` volume**: volume persisten yang di-mount ke kedua service, misalnya `/app/data`. File SQLite tetap ada setelah container dibangun ulang/dijalankan ulang.
+- **Satu image Python** dibangun dari `Dockerfile` dan dipakai kedua service dengan perintah startup berbeda. Gunakan `docker-compose.yml` dan `.dockerignore`.
+
+SQLite perlu `PRAGMA foreign_keys=ON`, `busy_timeout`, dan konfigurasi WAL yang sesuai untuk dua proses pada **host dan filesystem lokal yang sama**. Jangan gunakan filesystem jaringan untuk volume SQLite. Hanya worker yang menulis data snapshot; FastAPI boleh menulis record job yang kecil. Untuk multi-server atau concurrency tinggi, evaluasi migrasi job queue dan storage ke PostgreSQL nanti.
+
+### 4A.3 Network, secret, dan operasional
+
+- Default bind hanya ke localhost host: `127.0.0.1:8000:8000`; **jangan expose ke internet** tanpa autentikasi, TLS reverse proxy, dan kontrol akses.
+- `ODOO_API_KEY` melalui environment/secrets saat deployment, bukan di Dockerfile/image, repo, URL, atau request body.
+- Contoh konfigurasi aman disediakan pada `.env.example`. File `.env` nyata ditambahkan ke `.gitignore`.
+- Logging ke stdout/stderr Docker, tanpa token dan tanpa dump isi data sensitif.
+- Healthcheck API dan prosedur start/stop serta backup volume didokumentasikan di README.
+- Commands target setelah implementasi: `docker compose up -d --build`, `docker compose logs -f api worker`, `docker compose down`. **`down -v` tidak boleh dipakai sembarangan** karena menghapus volume data.
+
 ## 5. Strategi full synchronization
 
 ### 5.1 Prinsip
@@ -165,7 +223,7 @@ Sebelum menyatakan snapshot lengkap, simpan:
 
 ### 5.2 Algoritma full sync
 
-1. **Preflight:** validasi URL, API key, konektivitas, kemampuan model, company scope, dan field discovery.
+1. **Preflight:** request FastAPI atau worker memvalidasi URL, API key, konektivitas, kemampuan model, company scope, dan field discovery. FastAPI mengantrekan job dan segera mengembalikan `job_id`; worker mengeksekusi langkah berikutnya.
 2. Buat `sync_run` dengan status `running`; buat snapshot SQLite staging yang terisolasi dari snapshot aktif.
 3. Tarik referensi yang diperlukan: company, UOM, produk dan template produk (lengkap dalam scope yang telah ditentukan).
 4. Tarik `mrp.bom` dengan cursor/paging sampai habis. Gunakan filter yang eksplisit dan `active_test: false` bila didukung.
@@ -261,7 +319,7 @@ Uji yang wajib mencakup: BOM tanpa line, penggunaan satu komponen dalam banyak B
 - Gunakan akun bot integrasi dengan hak baca minimum pada tahap 1.
 - Jangan menampilkan API key/token dalam log, error trace, screenshot, atau dokumen.
 - Akses HTTPS wajib; verifikasi sertifikat TLS aktif.
-- Database lokal dan snapshot dapat berisi data perusahaan sensitif: simpan dalam direktori non-repo dengan permission terbatas dan backup terproteksi.
+- Database lokal dan snapshot dapat berisi data perusahaan sensitif: simpan di volume Docker persisten non-repo dengan permission terbatas dan backup terproteksi.
 - Nama host dan konfigurasi publik boleh didokumentasikan, **token rahasia tidak boleh**.
 - Untuk fase write-back: `WRITE_BACK_ENABLED=false` sebagai default, konfirmasi eksplisit, audit log, dan kemampuan dry-run.
 - Repository tidak menyimpan salinan BOM produksi ataupun file SQLite nyata.
@@ -274,18 +332,29 @@ odoo-tools-/
 │   └── ARCHITECTURE.md          # dokumen ini
 ├── src/
 │   └── odoo_tools/
+│       ├── main.py             # FastAPI entrypoint
+│       ├── api/
+│       │   ├── health.py       # health
+│       │   ├── connection.py   # Odoo preflight
+│       │   ├── sync_runs.py    # antrean + status job
+│       │   └── snapshots.py    # ringkasan data lokal
 │       ├── config.py
 │       ├── odoo_client.py       # JSON-2 API, auth, retry
 │       ├── discovery.py         # field / model discovery
+│       ├── worker.py            # proses sync job terpisah
 │       ├── sync.py              # full snapshot builder
 │       ├── db.py                # SQLite, schema, migrations
-│       ├── validation.py        # completeness checks
-│       └── cli.py               # perintah sync, status, inspect
+│       └── validation.py        # completeness checks
 ├── tests/
+│   ├── test_api.py
+│   ├── test_worker.py
 │   ├── test_pagination.py
 │   ├── test_mapping.py
 │   ├── test_sync.py
 │   └── test_validation.py
+├── Dockerfile                    # image FastAPI dan worker
+├── docker-compose.yml            # service api, worker, volume
+├── .dockerignore
 ├── .env.example                 # nama variable saja, tanpa secret
 ├── .gitignore                   # .env, *.db, data/, logs/
 ├── pyproject.toml
@@ -296,20 +365,23 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 
 ## 10. Roadmap dan urutan delivery
 
-### Milestone M1 — Koneksi + discovery
+### Milestone M1 — FastAPI + Docker + koneksi/discovery
 
-- CLI dapat menghubungi Odoo, membaca model/field yang tersedia, dan menguji hak akses.
+- Docker Compose menjalankan service `api` dan `worker` dengan volume SQLite persisten.
+- FastAPI dapat menghubungi Odoo, membaca model/field yang tersedia, dan menguji hak akses.
+- Endpoint `/api/v1/health` dan `/api/v1/connection/test` dapat diuji tanpa mengubah data Odoo.
 - Hasil: laporan preflight; **tidak ada perubahan di Odoo**.
 
-### Milestone M2 — Full download + SQLite
+### Milestone M2 — Async sync job + full download + SQLite
 
+- `POST /api/v1/sync/runs` mengantrekan pekerjaan, worker memprosesnya, dan endpoint status melaporkan progres.
 - Download seluruh header BOM, BOM lines, produk/template, UOM, dan referensi yang diperlukan.
 - Hasil: snapshot staging SQLite yang dapat dihitung dan di-query.
 
 ### Milestone M3 — Validation + snapshot publish
 
 - Validasi integrity/completeness, publish snapshot aktif, dan laporan.
-- Hasil: **Tahap 1 selesai**. Query lokal sudah dapat digunakan.
+- Hasil: **Tahap 1 selesai**. Ringkasan snapshot dapat dibaca melalui FastAPI dan query lokal sudah dapat digunakan.
 
 ### Milestone M4 — Local analysis
 
@@ -332,7 +404,7 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 2. Apakah BOM perlu diambil untuk satu company atau seluruh company yang diizinkan?
 3. Hak akses bot integrasi dan visibilitas BOM arsip.
 4. Field BOM/line tambahan apa yang tersedia di database aktual, termasuk varian, operasi, dan by-product?
-5. Lokasi instalasi tool lokal (laptop/server) dan kebutuhan pengamanan SQLite.
+5. Lokasi Docker host (laptop/server), backup Docker volume, dan kebutuhan pengamanan SQLite.
 6. Ukuran data riil untuk menentukan batch size, timeout, serta performa SQLite.
 
 ## 12. Prinsip implementasi yang tidak boleh dilanggar
@@ -340,7 +412,9 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 - **Download dulu, validasi dulu, baru analisis.**
 - **Jangan edit snapshot mentah.** Transformasi disimpan terpisah.
 - **ID Odoo harus dipertahankan** sebagai identitas relasi.
-- **Read-only secara nyata** pada tahap pertama.
+- **Read-only secara nyata** terhadap Odoo pada tahap pertama.
+- **FastAPI bukan worker sinkronisasi**: unduhan penuh diproses service worker terpisah.
+- **Volume data Docker harus persisten** dan aman dari penghapusan tidak sengaja.
 - **Tidak ada klaim “semua data” tanpa cakupan dan laporan validasi.**
 - **Satu kegagalan sinkronisasi tidak boleh merusak snapshot terakhir yang valid.**
 - **Write-back hanya setelah preview, validasi, persetujuan, dan conflict check.**
