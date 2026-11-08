@@ -361,9 +361,10 @@ def parse_workbook(data: bytes) -> list[tuple[int, dict]]:
         with z:
             infos = z.infolist()
             names = {info.filename for info in infos}
-            if (len(infos) > 1000 or
+            if (len(infos) > 1000 or len(names) != len(infos) or
                 sum(info.file_size for info in infos) > MAX_UNCOMPRESSED_BYTES or
-                any(info.filename.startswith("/") or ".." in info.filename.split("/")
+                any(info.flag_bits & 1 or info.filename.startswith("/")
+                    or ".." in info.filename.split("/")
                     or "externalLinks" in info.filename or "vbaProject" in info.filename
                     for info in infos)):
                 raise ValueError("Unsafe or oversized Excel archive")
@@ -476,6 +477,9 @@ def validate_import(db: sqlite3.Connection, workspace_id: int, parsed: list[tupl
                 old_product != baseline["original_component_product_id"] or
                 original_qty != Decimal(baseline["original_qty"])):
                 raise ValueError(f"{label}: source values/IDs changed; export a fresh Excel file")
+            for field in ("bom_name", "component_name", "sku"):
+                if str(values.get(field) or "") != str(baseline.get(field) or ""):
+                    raise ValueError(f"{label}: column {field} is read-only; edit only F and H")
             if new_product not in products:
                 raise ValueError(f"{label}: component Product ID {new_product} not in local snapshot")
             if old_product == new_product and original_qty == new_qty:
