@@ -7,6 +7,7 @@
   <title>Odoo BOM Tools</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <script defer src="/assets/app.js"></script>
+  <script defer src="/assets/connection.js"></script>
 </head>
 <body>
   <main class="layout">
@@ -28,6 +29,22 @@
       <div class="stack">
         <section class="panel"><h2>Workspace</h2><p class="subtle">Semua data BOM nantinya dipisahkan menurut workspace.</p><div id="workspaces" class="empty">Belum ada workspace.</div>
           <form id="workspace-form" class="inline-form" hidden><input id="workspace-name" placeholder="Nama workspace" required maxlength="100"><input id="workspace-slug" placeholder="Slug (contoh: produksi)" required pattern="[a-z0-9_-]{3,64}"><button type="submit">Buat workspace</button></form>
+        </section>
+        <section id="connection-panel" class="panel" hidden>
+          <div class="header-row"><div><h2>Pengaturan koneksi Odoo</h2><p class="subtle">Konfigurasi JSON-2 API per workspace. Akses Odoo hanya untuk pengecekan read-only.</p></div><span class="pill">READ ONLY</span></div>
+          <label for="connection-workspace">Pilih workspace</label>
+          <select id="connection-workspace" class="select-field"></select>
+          <form id="odoo-connection-form" class="connection-form">
+            <label for="odoo-url">URL Odoo (HTTPS)</label>
+            <input id="odoo-url" type="url" placeholder="https://perusahaan.odoo.com" required autocomplete="url">
+            <label for="odoo-database">Nama database (opsional)</label>
+            <input id="odoo-database" type="text" maxlength="128" placeholder="kosongkan jika tidak diperlukan" autocomplete="off">
+            <label for="odoo-key">Odoo API Key</label>
+            <input id="odoo-key" type="password" placeholder="Masukkan API Key baru" autocomplete="new-password" spellcheck="false">
+            <p class="hint" id="odoo-key-hint">API Key disimpan terenkripsi. Setelah disimpan, nilainya tidak dapat dilihat kembali.</p>
+            <div class="connection-actions"><button type="submit" id="odoo-save">Simpan konfigurasi</button><button type="button" id="odoo-test" class="secondary">Test Connection</button></div>
+          </form>
+          <div class="connection-status" id="odoo-connection-status" role="status" aria-live="polite"></div>
         </section>
         <section class="panel"><h2>Keamanan akun</h2><p class="subtle">Ubah password; seluruh sesi aktif akan berakhir.</p>
           <form id="password-form" class="three-fields"><input id="old-password" type="password" autocomplete="current-password" placeholder="Password saat ini" required><input id="new-password" type="password" autocomplete="new-password" placeholder="Password baru (min. 12)" minlength="12" required><button type="submit">Ganti password</button></form>
