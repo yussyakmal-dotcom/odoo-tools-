@@ -555,7 +555,7 @@ Folder dan file di atas **rencana**, belum otomatis dibuat.
 
 ### Milestone M4 — Download Excel BOM (kode telah dibuat)
 
-- Excel berisi sheet `BOM Lines`, `Instructions`, serta `Product Catalog`.
+- Excel berisi sheet `BOM Lines`, `Instructions`, `Product Catalog`, serta `UOM Catalog`. `BOM Lines` menyertakan kolom read-only `uom_name` tepat setelah `uom_id`, diisi dari `uom.uom.name` lokal; catalog satuan memuat ID, nama, kategori, dan rounding. File Excel lama tanpa kolom `uom_name` tetap diterima saat upload.
 - Seluruh BOM Lines dari snapshot aktif workspace diekspor beserta dua kolom edit (`new_component_product_id`, `new_qty`).
 - Pencarian/Where Used lokal sebagai antarmuka terpisah **belum dibuat**.
 - Tidak ada penulisan ke Odoo.
