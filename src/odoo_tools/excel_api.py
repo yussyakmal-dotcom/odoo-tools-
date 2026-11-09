@@ -48,7 +48,20 @@ def router_for(workspace_access, require_ready, csrf_guard, db_path) -> APIRoute
                     str(product.get("display_name") or row["odoo_id"]),
                     default_uom or "", "Yes" if product.get("active", True) else "No",
                 ])
-        data = export_workbook(wid, snapshot_id, lines, catalog)
+            uom_catalog = []
+            for row in db.execute(
+                "SELECT odoo_id,raw_json FROM sync_records WHERE snapshot_id=? "
+                "AND model='uom.uom' ORDER BY odoo_id", (snapshot_id,),
+            ):
+                uom = json.loads(row["raw_json"])
+                category = uom.get("category_id")
+                category_label = (category[1] if isinstance(category, list) and
+                                  len(category) > 1 else str(category or ""))
+                uom_catalog.append([
+                    row["odoo_id"], str(uom.get("name") or ""), category_label,
+                    uom.get("rounding") if uom.get("rounding") is not None else "",
+                ])
+        data = export_workbook(wid, snapshot_id, lines, catalog, uom_catalog)
         return Response(
             data,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
