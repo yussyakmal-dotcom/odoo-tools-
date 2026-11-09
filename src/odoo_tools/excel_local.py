@@ -31,9 +31,12 @@ TAG = lambda tag: "{" + NS + "}" + tag
 COLUMNS = (
     "workspace_id", "snapshot_id", "bom_id", "bom_line_id",
     "original_component_product_id", "new_component_product_id",
-    "original_qty", "new_qty", "uom_id", "bom_name",
+    "original_qty", "new_qty", "uom_id", "uom_name", "bom_name",
     "component_name", "sku",
 )
+# Previous exports remain accepted on upload, so users can keep an Excel file
+# they already started editing before uom_name was introduced.
+LEGACY_COLUMNS = tuple(name for name in COLUMNS if name != "uom_name")
 EDITABLE = {"new_component_product_id", "new_qty"}
 
 
@@ -169,6 +172,13 @@ def load_lines(db: sqlite3.Connection, workspace_id: int, snapshot_id: int) -> l
             "WHERE snapshot_id=? AND model='product.product'", (snapshot_id,),
         )
     }
+    uoms = {
+        row["odoo_id"]: json.loads(row["raw_json"])
+        for row in db.execute(
+            "SELECT odoo_id,raw_json FROM sync_records "
+            "WHERE snapshot_id=? AND model='uom.uom'", (snapshot_id,),
+        )
+    }
     result = []
     for row in rows:
         raw = json.loads(row["line_json"])
@@ -181,13 +191,18 @@ def load_lines(db: sqlite3.Connection, workspace_id: int, snapshot_id: int) -> l
         except ValueError as exc:
             raise HTTPException(409, f"Invalid local quantity in BOM line {row['bom_line_id']}: {exc}") from exc
         product = products[product_id]
+        uom_id = row["uom_id"] or _m2o(raw.get("product_uom_id")) or 0
+        source_relation = raw.get("product_uom_id")
+        relation_label = (source_relation[1] if isinstance(source_relation, list)
+                          and len(source_relation) > 1 and isinstance(source_relation[1], str) else "")
+        uom_name = str(uoms.get(uom_id, {}).get("name") or relation_label)
         result.append({
             "workspace_id": workspace_id, "snapshot_id": snapshot_id,
             "bom_id": row["bom_id"], "bom_line_id": row["bom_line_id"],
             "original_component_product_id": product_id,
             "new_component_product_id": product_id,
             "original_qty": quantity, "new_qty": quantity,
-            "uom_id": row["uom_id"] or _m2o(raw.get("product_uom_id")) or 0,
+            "uom_id": uom_id, "uom_name": uom_name,
             "bom_name": str(bom.get("display_name") or bom.get("code") or row["bom_id"]),
             "component_name": str(product.get("display_name") or product.get("name") or product_id),
             "sku": str(product.get("default_code") or ""),
@@ -225,7 +240,7 @@ def _sheet_xml(headers: tuple[str, ...], rows: list[list[object]]) -> bytes:
     width = "".join(
         f'<col min="{idx}" max="{idx}" width="{width}" customWidth="1"/>'
         for idx, width in enumerate(
-            (15, 15, 13, 15, 23, 23, 18, 18, 12, 38, 38, 22)[:len(headers)], start=1
+            (15, 15, 13, 15, 23, 23, 18, 18, 12, 24, 38, 38, 22)[:len(headers)], start=1
         )
     )
     pieces = [
@@ -250,7 +265,8 @@ def _sheet_xml(headers: tuple[str, ...], rows: list[list[object]]) -> bytes:
     return "".join(pieces).encode("utf-8")
 
 
-def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict], catalog: list[list[object]]) -> bytes:
+def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict], catalog: list[list[object]],
+                    uom_catalog: list[list[object]]) -> bytes:
     rows: list[list[object]] = []
     for line in lines:
         values: list[object] = []
@@ -271,6 +287,8 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict], cata
         ["LANGKAH 3", "Upload Excel ke aplikasi, periksa preview, lalu tekan Apply to Local."],
         ["CATATAN", "Qty boleh 0. Qty baru tidak boleh negatif; Product ID wajib ada dalam snapshot."],
         ["KATALOG PRODUK", "Gunakan sheet Product Catalog untuk memilih Product ID pengganti."],
+        ["KATALOG UOM", "Kolom J pada BOM Lines adalah uom_name; lihat juga sheet UOM Catalog."],
+        ["EDIT UOM", "uom_id dan uom_name hanya referensi, tidak boleh diedit."],
         ["KEAMANAN", "Snapshot Odoo asli tetap utuh; perubahan hanya di working BOM lokal."],
     ]
     ct = (
@@ -288,6 +306,8 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict], cata
         'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
         '<Override PartName="/xl/worksheets/sheet3.xml" '
         'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet4.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
         '</Types>'
     )
     root_rels = (
@@ -303,7 +323,8 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict], cata
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
         '<sheets><sheet name="BOM Lines" sheetId="1" r:id="rId1"/>'
         '<sheet name="Instructions" sheetId="2" r:id="rId2"/>'
-        '<sheet name="Product Catalog" sheetId="3" r:id="rId4"/></sheets></workbook>'
+        '<sheet name="Product Catalog" sheetId="3" r:id="rId4"/>'
+        '<sheet name="UOM Catalog" sheetId="4" r:id="rId5"/></sheets></workbook>'
     )
     workbook_rels = (
         '<?xml version="1.0" encoding="utf-8"?>'
@@ -319,7 +340,10 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict], cata
         'Target="styles.xml"/>'
         '<Relationship Id="rId4" '
         'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
-        'Target="worksheets/sheet3.xml"/></Relationships>'
+        'Target="worksheets/sheet3.xml"/>'
+        '<Relationship Id="rId5" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet4.xml"/></Relationships>'
     )
     styles = (
         '<?xml version="1.0" encoding="utf-8"?>'
@@ -349,6 +373,8 @@ def export_workbook(workspace_id: int, snapshot_id: int, lines: list[dict], cata
             ("xl/worksheets/sheet2.xml", _sheet_xml(("Petunjuk", "Keterangan"), notes)),
             ("xl/worksheets/sheet3.xml", _sheet_xml(
                 ("Product ID", "SKU", "Product Name", "Default UOM ID", "Active"), catalog)),
+            ("xl/worksheets/sheet4.xml", _sheet_xml(
+                ("UOM ID", "UOM Name", "Category", "Rounding"), uom_catalog)),
         ):
             z.writestr(name, value)
     return buffer.getvalue()
@@ -422,12 +448,18 @@ def parse_workbook(data: bytes) -> list[tuple[int, dict]]:
                         values[col] = value
                 if row_no == 1:
                     headers = tuple(str(values.get(i, "")) for i in range(1, len(COLUMNS) + 1))
-                    if headers != COLUMNS or any(c > len(COLUMNS) for c in values):
-                        raise ValueError("Excel headers do not match the BOM Tools template")
+                    if headers == COLUMNS:
+                        file_columns = COLUMNS
+                    elif headers == LEGACY_COLUMNS + ("",):
+                        file_columns = LEGACY_COLUMNS
+                    else:
+                        raise ValueError("Excel headers do not match a BOM Tools template")
+                    if any(c > len(file_columns) for c in values):
+                        raise ValueError("Unexpected column in Excel header row")
                 elif values:
-                    if any(c > len(COLUMNS) for c in values):
+                    if any(c > len(file_columns) for c in values):
                         raise ValueError(f"Unexpected column in Excel row {row_no}")
-                    result.append((row_no, {name: values.get(i) for i, name in enumerate(COLUMNS, 1)}))
+                    result.append((row_no, {name: values.get(i) for i, name in enumerate(file_columns, 1)}))
                     if len(result) > MAX_LINES:
                         raise ValueError("Too many BOM lines in uploaded Excel")
             if "headers" not in locals():
@@ -487,7 +519,10 @@ def validate_import(db: sqlite3.Connection, workspace_id: int, parsed: list[tupl
                 old_product != baseline["original_component_product_id"] or
                 original_qty != Decimal(baseline["original_qty"])):
                 raise ValueError(f"{label}: source values/IDs changed; export a fresh Excel file")
-            for field in ("bom_name", "component_name", "sku"):
+            check_fields = ("bom_name", "component_name", "sku")
+            if "uom_name" in values:
+                check_fields += ("uom_name",)
+            for field in check_fields:
                 if str(values.get(field) or "") != str(baseline.get(field) or ""):
                     raise ValueError(f"{label}: column {field} is read-only; edit only F and H")
             if new_product not in products:
