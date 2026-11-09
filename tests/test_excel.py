@@ -364,3 +364,52 @@ def test_missing_source_qty_reports_specific_reason_without_mutating_snapshot(se
     assert response.status_code == 409
     assert "BOM line 100" in response.text
     assert "missing" in response.text
+
+
+def test_uom_name_column_and_uom_catalog_sheet(setup):
+    client, csrf, wid, path, snap = setup
+    xlsx = export(client, wid)
+    parsed = parse_workbook(xlsx)
+    assert "uom_name" in COLUMNS
+    assert COLUMNS.index("uom_name") == 9  # Column J, beside uom_id in I.
+    assert all(row["uom_id"] == "1" and row["uom_name"] == "kg" for _, row in parsed)
+    with ZipFile(BytesIO(xlsx)) as archive:
+        assert "xl/worksheets/sheet4.xml" in archive.namelist()
+        workbook = archive.read("xl/workbook.xml")
+        assert b'UOM Catalog' in workbook
+        uom_sheet = archive.read("xl/worksheets/sheet4.xml")
+        assert b"kg" in uom_sheet and b"Mass" in uom_sheet
+    assert upload(client, csrf, wid, xlsx).json()["state"] == "no_changes"
+    invalid = upload(client, csrf, wid, edit_excel(xlsx, {"J2": "wrong"}))
+    assert invalid.status_code == 422
+    assert "uom_name" in invalid.text
+
+
+def test_legacy_excel_without_uom_name_still_uploads(setup):
+    """Files exported before the UOM Name addition remain importable."""
+    client, csrf, wid, path, snap = setup
+    xlsx = export(client, wid)
+    buffer = BytesIO()
+    with ZipFile(BytesIO(xlsx)) as source, ZipFile(buffer, "w", ZIP_DEFLATED) as dest:
+        for name in source.namelist():
+            data = source.read(name)
+            if name == "xl/worksheets/sheet1.xml":
+                root = ET.fromstring(data)
+                sheet = root.find(NS + "sheetData")
+                for row in sheet:
+                    for cell in list(row.findall(NS + "c")):
+                        address = cell.get("r")
+                        col = address[0]
+                        if col == "J":
+                            row.remove(cell)
+                        elif col in ("K", "L", "M"):
+                            cell.set("r", chr(ord(col)-1) + address[1:])
+                data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            dest.writestr(name, data)
+    legacy = buffer.getvalue()
+    imported = parse_workbook(legacy)
+    assert len(imported) == 3
+    assert "uom_name" not in imported[0][1]
+    response = upload(client, csrf, wid, legacy)
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "no_changes"
