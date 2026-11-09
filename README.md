@@ -140,7 +140,7 @@ Port browser tetap `http://localhost:700/` pada host; Docker memetakan localhost
 **Sudah diimplementasikan.** Sesudah Download All BOM selesai, login dan buka panel **Excel Export–Import BOM Lokal** pada dashboard.
 
 1. Pilih workspace dengan snapshot aktif.
-2. Klik **Download Excel BOM**. Workbook berisi tiga sheet: `BOM Lines` (data dan kolom edit), `Instructions` (petunjuk), dan `Product Catalog` (Product ID/SKU/nama untuk memilih pengganti).
+2. Klik **Download Excel BOM**. Workbook berisi empat sheet: `BOM Lines` (data dan kolom edit), `Instructions` (petunjuk), `Product Catalog` (Product ID/SKU/nama untuk memilih pengganti), dan `UOM Catalog` (UOM ID, nama satuan, kategori, dan rounding). Di sheet `BOM Lines`, kolom **I: uom_id** dan **J: uom_name** berisi identitas serta deskripsi satuan dari snapshot lokal `uom.uom`. Keduanya read-only; posisi kolom editable **F** dan **H** tidak berubah. Excel ekspor versi sebelumnya masih diterima saat upload.
 3. Di sheet `BOM Lines`, **hanya ubah kolom F** `new_component_product_id` dan/atau **kolom H** `new_qty`. Komponen dan qty boleh tetap sama atau berubah secara independen. **Jangan mengubah kolom ID, menambah atau menghapus baris.**
 4. Klik **Upload & Preview Perubahan**, pilih file `.xlsx` hasil edit. Backend memeriksa seluruh baris terhadap working BOM terkini dan menampilkan ringkasan perubahan, maksimal 100 contoh dan peringatan. File yang tidak valid **ditolak seluruhnya**.
 5. Setelah memeriksa perubahan, klik **Apply to Local**. Perubahan diterapkan **atomik pada versi kerja BOM di SQLite**, tanpa menyentuh snapshot asli maupun server Odoo.
